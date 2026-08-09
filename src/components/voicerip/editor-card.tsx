@@ -5,9 +5,11 @@ import {
   Clock,
   Download,
   FileAudio,
+  Mic,
   Music,
   Plus,
   Scissors,
+  Waves,
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -23,7 +25,18 @@ import {
   type Mp3Bitrate,
   type VideoItem,
 } from "@/lib/extract-audio";
-import { formatBytes, formatDuration, formatHHMMSS, parseTimestamp } from "@/lib/format";
+import { isolateVoice } from "@/lib/isolate-voice";
+import {
+  formatBytes,
+  formatDuration,
+  formatHHMMSS,
+  parseTimestamp,
+} from "@/lib/format";
+
+type Mode = "extract" | "isolate";
+type Status = "idle" | "working" | "done" | "error";
+
+const BITRATES: Mp3Bitrate[] = ["128k", "192k", "256k", "320k"];
 
 interface EditorCardProps {
   item: VideoItem;
@@ -32,16 +45,13 @@ interface EditorCardProps {
   onError: (message: string) => void;
 }
 
-type Status = "idle" | "extracting" | "done" | "error";
-
-const BITRATES: Mp3Bitrate[] = ["128k", "192k", "256k", "320k"];
-
 export function EditorCard({
   item,
   onRemove,
   onNewFile,
   onError,
 }: EditorCardProps) {
+  const [mode, setMode] = React.useState<Mode>("extract");
   const [format, setFormat] = React.useState<AudioFormat>("mp3");
   const [bitrate, setBitrate] = React.useState<Mp3Bitrate>("192k");
   const [startStr, setStartStr] = React.useState("");
@@ -49,11 +59,11 @@ export function EditorCard({
   const [status, setStatus] = React.useState<Status>("idle");
   const [progress, setProgress] = React.useState(0);
   const [result, setResult] = React.useState<ExtractResult | null>(null);
+  const [resultLabel, setResultLabel] = React.useState("");
   const [error, setError] = React.useState<string | null>(null);
 
   const downloadUrlRef = React.useRef<string | null>(null);
 
-  // Revoke any object URL when the result changes or the card unmounts.
   React.useEffect(() => {
     return () => {
       if (downloadUrlRef.current) URL.revokeObjectURL(downloadUrlRef.current);
@@ -61,55 +71,74 @@ export function EditorCard({
   }, []);
 
   const duration = item.duration;
-  const maxEnd = duration ?? Infinity;
 
-  const onExtract = async () => {
-    setError(null);
-    setResult(null);
-
+  const validateTrim = (): {
+    startSec: number | null;
+    endSec: number | null;
+  } | null => {
     const startSec = startStr.trim() ? parseTimestamp(startStr) : null;
     const endSec = endStr.trim() ? parseTimestamp(endStr) : null;
-
     if (startStr.trim() && startSec === null) {
-      setError("Start time must be HH:MM:SS (e.g. 00:00:05).");
+      setError("Start time must be HH:MM:SS.");
       setStatus("error");
       onError("Start time must be HH:MM:SS.");
-      return;
+      return null;
     }
     if (endStr.trim() && endSec === null) {
-      setError("End time must be HH:MM:SS (e.g. 00:01:30).");
+      setError("End time must be HH:MM:SS.");
       setStatus("error");
       onError("End time must be HH:MM:SS.");
-      return;
+      return null;
     }
-    if (
-      startSec != null &&
-      endSec != null &&
-      endSec <= startSec
-    ) {
+    if (startSec != null && endSec != null && endSec <= startSec) {
       setError("End time must be after the start time.");
       setStatus("error");
       onError("End time must be after the start time.");
-      return;
+      return null;
     }
     if (duration != null && startSec != null && startSec >= duration) {
       setError("Start time is past the end of the video.");
       setStatus("error");
       onError("Start time is past the end of the video.");
-      return;
+      return null;
     }
+    return { startSec, endSec };
+  };
 
-    setStatus("extracting");
+  const onProcess = async () => {
+    setError(null);
+    setResult(null);
+
+    const trimmed = mode === "extract" ? validateTrim() : { startSec: null, endSec: null };
+    if (!trimmed) return;
+
+    setStatus("working");
     setProgress(0);
 
     try {
-      const res = await extractAudio(item.file, {
-        format,
-        bitrate,
-        startSec,
-        endSec,
-        onProgress: (r) => setProgress(r),
-      });
+      let res: ExtractResult;
+      if (mode === "isolate") {
+        const iso = await isolateVoice(item.file, {
+          onProgress: (r) => setProgress(r),
+        });
+        res = {
+          blob: iso.blob,
+          filename: iso.filename,
+          sizeBytes: iso.sizeBytes,
+          mime: iso.mime,
+        };
+        setResultLabel("VOCALS");
+      } else {
+        res = await extractAudio(item.file, {
+          format,
+          bitrate,
+          startSec: trimmed.startSec,
+          endSec: trimmed.endSec,
+          onProgress: (r) => setProgress(r),
+        });
+        setResultLabel(format.toUpperCase());
+      }
+
       if (downloadUrlRef.current) URL.revokeObjectURL(downloadUrlRef.current);
       downloadUrlRef.current = URL.createObjectURL(res.blob);
       setResult(res);
@@ -120,7 +149,9 @@ export function EditorCard({
       const msg =
         err instanceof Error
           ? err.message
-          : "Audio extraction failed. Try a smaller file or a different format.";
+          : mode === "isolate"
+            ? "Voice isolation failed. Try a stereo file for best results."
+            : "Audio extraction failed. Try a smaller file or a different format.";
       setError(msg);
       setStatus("error");
       onError(msg);
@@ -142,217 +173,282 @@ export function EditorCard({
     setEndStr(duration != null ? formatHHMMSS(duration) : "");
   };
 
-  const extracting = status === "extracting";
+  const working = status === "working";
+  const actionLabel =
+    mode === "isolate" ? "Isolate Voice" : "Extract Audio";
 
   return (
-    <div className="flex h-full w-full flex-col gap-3 overflow-y-auto p-3">
-      {/* file info bar */}
-      <div className="flex items-center gap-3 rounded-lg border bg-card p-3">
-        <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
+    <div className="flex h-full w-full flex-col overflow-y-auto">
+      {/* File info bar */}
+      <div className="flex items-center gap-3 border-b px-4 py-3">
+        <div className="flex size-8 shrink-0 items-center justify-center rounded bg-foreground text-background">
           <FileAudio className="size-4" />
         </div>
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-medium" title={item.file.name}>
+          <p className="truncate text-sm font-medium leading-tight" title={item.file.name}>
             {item.file.name}
           </p>
-          <p className="font-mono text-xs text-muted-foreground">
+          <p className="mt-0.5 font-mono text-[11px] tabular-nums text-muted-foreground">
             {formatBytes(item.file.size)}
             {duration != null && (
               <>
-                <span className="mx-1.5">·</span>
+                <span className="mx-1.5 opacity-50">/</span>
                 {formatDuration(duration)}
               </>
             )}
           </p>
         </div>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="size-8 shrink-0 text-muted-foreground hover:text-foreground"
+        <button
           onClick={onRemove}
+          disabled={working}
+          className="flex size-7 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
           aria-label="Remove file"
-          disabled={extracting}
         >
           <X className="size-4" />
-        </Button>
+        </button>
       </div>
 
-      {/* format + quality */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <div className="space-y-1.5">
-          <Label className="text-xs text-muted-foreground">Format</Label>
+      {/* Body */}
+      <div className="flex flex-1 flex-col gap-5 p-4">
+        {/* Mode selector */}
+        <div>
+          <Label className="mb-2 block text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+            Mode
+          </Label>
           <ToggleGroup
             type="single"
-            value={format}
+            value={mode}
             onValueChange={(v) => {
-              if (v) setFormat(v as AudioFormat);
+              if (v) {
+                setMode(v as Mode);
+                setStatus("idle");
+                setResult(null);
+                setError(null);
+              }
             }}
-            className="flex w-full"
+            className="grid w-full grid-cols-2"
           >
             <ToggleGroupItem
-              value="mp3"
+              value="extract"
               variant="outline"
-              className="h-8 flex-1 data-[state=on]:border-emerald-500 data-[state=on]:text-emerald-600 dark:data-[state=on]:text-emerald-400"
+              className="h-9 gap-1.5 data-[state=on]:border-foreground data-[state=on]:bg-foreground data-[state=on]:text-background"
             >
-              MP3
+              <Music className="size-3.5" />
+              <span className="text-xs font-medium">Extract Audio</span>
             </ToggleGroupItem>
             <ToggleGroupItem
-              value="wav"
+              value="isolate"
               variant="outline"
-              className="h-8 flex-1 data-[state=on]:border-emerald-500 data-[state=on]:text-emerald-600 dark:data-[state=on]:text-emerald-400"
+              className="h-9 gap-1.5 data-[state=on]:border-foreground data-[state=on]:bg-foreground data-[state=on]:text-background"
             >
-              WAV
+              <Mic className="size-3.5" />
+              <span className="text-xs font-medium">Isolate Voice</span>
             </ToggleGroupItem>
           </ToggleGroup>
         </div>
 
-        <div className="space-y-1.5">
-          <Label className="text-xs text-muted-foreground">
-            Quality
-            {format === "wav" && (
-              <span className="ml-1 text-muted-foreground/70">
-                (lossless, n/a)
-              </span>
-            )}
-          </Label>
-          {format === "mp3" ? (
-            <ToggleGroup
-              type="single"
-              value={bitrate}
-              onValueChange={(v) => {
-                if (v) setBitrate(v as Mp3Bitrate);
-              }}
-              className="flex w-full"
-            >
-              {BITRATES.map((b) => (
-                <ToggleGroupItem
-                  key={b}
-                  value={b}
-                  variant="outline"
-                  className="h-8 flex-1 font-mono text-xs data-[state=on]:border-emerald-500 data-[state=on]:text-emerald-600 dark:data-[state=on]:text-emerald-400"
+        {/* Mode-specific options */}
+        {mode === "extract" ? (
+          <>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div>
+                <Label className="mb-2 block text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                  Format
+                </Label>
+                <ToggleGroup
+                  type="single"
+                  value={format}
+                  onValueChange={(v) => {
+                    if (v) setFormat(v as AudioFormat);
+                  }}
+                  className="flex w-full"
                 >
-                  {b}
-                </ToggleGroupItem>
-              ))}
-            </ToggleGroup>
-          ) : (
-            <div className="flex h-8 items-center rounded-md border border-dashed px-3 text-xs text-muted-foreground">
-              16-bit PCM
+                  <ToggleGroupItem
+                    value="mp3"
+                    variant="outline"
+                    className="h-8 flex-1 font-mono text-xs data-[state=on]:border-foreground data-[state=on]:text-foreground"
+                  >
+                    MP3
+                  </ToggleGroupItem>
+                  <ToggleGroupItem
+                    value="wav"
+                    variant="outline"
+                    className="h-8 flex-1 font-mono text-xs data-[state=on]:border-foreground data-[state=on]:text-foreground"
+                  >
+                    WAV
+                  </ToggleGroupItem>
+                </ToggleGroup>
+              </div>
+
+              <div>
+                <Label className="mb-2 block text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                  Bitrate
+                  {format === "wav" && (
+                    <span className="ml-1 normal-case tracking-normal text-muted-foreground/60">
+                      lossless
+                    </span>
+                  )}
+                </Label>
+                {format === "mp3" ? (
+                  <ToggleGroup
+                    type="single"
+                    value={bitrate}
+                    onValueChange={(v) => {
+                      if (v) setBitrate(v as Mp3Bitrate);
+                    }}
+                    className="flex w-full"
+                  >
+                    {BITRATES.map((b) => (
+                      <ToggleGroupItem
+                        key={b}
+                        value={b}
+                        variant="outline"
+                        className="h-8 flex-1 font-mono text-xs data-[state=on]:border-foreground data-[state=on]:text-foreground"
+                      >
+                        {b}
+                      </ToggleGroupItem>
+                    ))}
+                  </ToggleGroup>
+                ) : (
+                  <div className="flex h-8 items-center rounded-md border border-dashed px-3 font-mono text-xs text-muted-foreground">
+                    PCM 16-bit
+                  </div>
+                )}
+              </div>
             </div>
+
+            {/* Trim */}
+            <div>
+              <div className="mb-2 flex items-center justify-between">
+                <Label className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                  <Scissors className="size-3" />
+                  Trim
+                </Label>
+                <button
+                  onClick={useFullDuration}
+                  disabled={working || duration == null}
+                  className="text-[11px] text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
+                >
+                  Use full duration
+                </button>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="relative">
+                  <Clock className="pointer-events-none absolute left-2.5 top-1/2 size-3 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    value={startStr}
+                    onChange={(e) => setStartStr(e.target.value)}
+                    placeholder="00:00:00"
+                    disabled={working}
+                    className="h-8 border-border pl-7 font-mono text-xs tabular-nums"
+                    aria-label="Trim start time"
+                  />
+                </div>
+                <div className="relative">
+                  <Clock className="pointer-events-none absolute left-2.5 top-1/2 size-3 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    value={endStr}
+                    onChange={(e) => setEndStr(e.target.value)}
+                    placeholder={
+                      duration != null ? formatHHMMSS(duration) : "00:00:00"
+                    }
+                    disabled={working}
+                    className="h-8 border-border pl-7 font-mono text-xs tabular-nums"
+                    aria-label="Trim end time"
+                  />
+                </div>
+              </div>
+            </div>
+          </>
+        ) : (
+          <div className="rounded-md border border-dashed bg-muted/30 p-4">
+            <div className="flex items-start gap-2.5">
+              <Waves className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+              <div className="space-y-1.5 text-xs leading-relaxed text-muted-foreground">
+                <p className="font-medium text-foreground">
+                  Center-channel vocal extraction
+                </p>
+                <p>
+                  Isolates vocals using stereo mid-side analysis with an
+                  energy-ratio soft mask, then an 85 Hz–12 kHz bandpass +
+                  presence boost + compressor. Output is mono WAV.
+                </p>
+                <p className="text-muted-foreground/70">
+                  Works best on stereo music with center-panned vocals.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Action / progress */}
+        <div className="mt-auto">
+          {working ? (
+            <div className="space-y-2">
+              <Progress
+                value={progress * 100}
+                className="h-1.5 [&_[data-slot=progress-indicator]]:bg-foreground"
+              />
+              <p className="text-center text-[11px] tabular-nums text-muted-foreground">
+                {mode === "isolate" ? "Isolating" : "Extracting"}…{" "}
+                {Math.round(progress * 100)}%
+              </p>
+            </div>
+          ) : (
+            <Button
+              onClick={onProcess}
+              size="lg"
+              className="h-10 w-full gap-2 bg-foreground text-background hover:bg-foreground/90"
+            >
+              {mode === "isolate" ? (
+                <Mic className="size-4" />
+              ) : (
+                <Music className="size-4" />
+              )}
+              {actionLabel}
+            </Button>
           )}
         </div>
-      </div>
 
-      {/* trim */}
-      <div className="space-y-1.5">
-        <div className="flex items-center justify-between">
-          <Label className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <Scissors className="size-3" />
-            Trim (optional)
-          </Label>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-6 px-2 text-xs text-muted-foreground"
-            onClick={useFullDuration}
-            disabled={extracting || duration == null}
-          >
-            Use full duration
-          </Button>
-        </div>
-        <div className="grid grid-cols-2 gap-2">
-          <div className="relative">
-            <Clock className="pointer-events-none absolute left-2.5 top-1/2 size-3 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              value={startStr}
-              onChange={(e) => setStartStr(e.target.value)}
-              placeholder="00:00:00"
-              disabled={extracting}
-              className="h-8 pl-7 font-mono text-xs"
-              aria-label="Trim start time"
-            />
-          </div>
-          <div className="relative">
-            <Clock className="pointer-events-none absolute left-2.5 top-1/2 size-3 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              value={endStr}
-              onChange={(e) => setEndStr(e.target.value)}
-              placeholder={duration != null ? formatHHMMSS(duration) : "00:00:00"}
-              disabled={extracting}
-              className="h-8 pl-7 font-mono text-xs"
-              aria-label="Trim end time"
-            />
-          </div>
-        </div>
-      </div>
-
-      {/* extract button / progress */}
-      {extracting ? (
-        <div className="space-y-1.5">
-          <Progress
-            value={progress * 100}
-            className="h-2 bg-emerald-500/20 [&_[data-slot=progress-indicator]]:bg-emerald-500"
-          />
-          <p className="text-center text-xs text-muted-foreground">
-            Extracting audio… {Math.round(progress * 100)}%
+        {/* Error */}
+        {error && (
+          <p className="rounded-md border border-amber-500/30 bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:bg-amber-950/20 dark:text-amber-300">
+            {error}
           </p>
-        </div>
-      ) : (
-        <Button
-          onClick={onExtract}
-          size="lg"
-          className="h-10 w-full bg-emerald-600 text-white hover:bg-emerald-700 dark:bg-emerald-600 dark:hover:bg-emerald-500"
-        >
-          <Music className="size-4" />
-          Extract Audio
-        </Button>
-      )}
+        )}
 
-      {/* error */}
-      {error && (
-        <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:bg-amber-950/30 dark:text-amber-300">
-          {error}
-        </p>
-      )}
-
-      {/* result */}
-      {status === "done" && result && (
-        <div
-          className={cn(
-            "flex items-center gap-3 rounded-lg border border-emerald-500/40 bg-emerald-50 p-3 dark:bg-emerald-950/20"
-          )}
-        >
-          <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-emerald-600 text-white">
-            <FileAudio className="size-4" />
+        {/* Result */}
+        {status === "done" && result && (
+          <div className="flex items-center gap-3 border-l-2 border-foreground bg-muted/40 px-3 py-2.5">
+            <div className="min-w-0 flex-1">
+              <p
+                className="truncate text-sm font-medium leading-tight"
+                title={result.filename}
+              >
+                {result.filename}
+              </p>
+              <p className="mt-0.5 font-mono text-[11px] tabular-nums text-muted-foreground">
+                {formatBytes(result.sizeBytes)} · {resultLabel}
+              </p>
+            </div>
+            <Button
+              onClick={onDownload}
+              size="sm"
+              className="h-8 shrink-0 gap-1.5"
+            >
+              <Download className="size-3.5" />
+              Download
+            </Button>
+            <button
+              onClick={onNewFile}
+              className="flex size-8 shrink-0 items-center justify-center rounded-md border text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
+              aria-label="New file"
+            >
+              <Plus className="size-4" />
+            </button>
           </div>
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-medium" title={result.filename}>
-              {result.filename}
-            </p>
-            <p className="font-mono text-xs text-muted-foreground">
-              {formatBytes(result.sizeBytes)} ·{" "}
-              {format.toUpperCase()}
-            </p>
-          </div>
-          <Button
-            onClick={onDownload}
-            size="sm"
-            className="h-8 shrink-0 bg-emerald-600 text-white hover:bg-emerald-700 dark:bg-emerald-600 dark:hover:bg-emerald-500"
-          >
-            <Download className="size-3.5" />
-            Download
-          </Button>
-          <Button
-            onClick={onNewFile}
-            size="icon"
-            variant="outline"
-            className="size-8 shrink-0"
-            aria-label="New file"
-          >
-            <Plus className="size-4" />
-          </Button>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }

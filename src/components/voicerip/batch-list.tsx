@@ -6,7 +6,6 @@ import {
   Download,
   FileAudio,
   Loader2,
-  Music,
   Plus,
   X,
 } from "lucide-react";
@@ -21,17 +20,28 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { cn } from "@/lib/utils";
 import {
   extractAudio,
   terminateFFmpeg,
-  type AudioFormat,
   type ExtractResult,
   type Mp3Bitrate,
   type VideoItem,
 } from "@/lib/extract-audio";
+import { isolateVoice } from "@/lib/isolate-voice";
 import { isMobile } from "@/lib/mobile";
 import { formatBytes, formatDuration } from "@/lib/format";
+
+type RowFormat = "mp3" | "wav" | "vocals";
+type RowStatus = "queued" | "working" | "done" | "error";
+
+interface RowState {
+  format: RowFormat;
+  status: RowStatus;
+  progress: number;
+  result: ExtractResult | null;
+  error: string | null;
+  downloadUrl: string | null;
+}
 
 interface BatchListProps {
   items: VideoItem[];
@@ -39,17 +49,6 @@ interface BatchListProps {
   onRemove: (id: string) => void;
   onClear: () => void;
   onError: (message: string) => void;
-}
-
-type RowStatus = "queued" | "extracting" | "done" | "error";
-
-interface RowState {
-  format: AudioFormat;
-  status: RowStatus;
-  progress: number;
-  result: ExtractResult | null;
-  error: string | null;
-  downloadUrl: string | null;
 }
 
 const BITRATES: Mp3Bitrate[] = ["128k", "192k", "256k", "320k"];
@@ -61,12 +60,10 @@ export function BatchList({
   onClear,
   onError,
 }: BatchListProps) {
-  // Per-row state keyed by item id.
   const [rows, setRows] = React.useState<Record<string, RowState>>({});
   const [bitrate, setBitrate] = React.useState<Mp3Bitrate>("192k");
   const [running, setRunning] = React.useState(false);
 
-  // Keep row state in sync with items: add defaults for new items, drop removed.
   React.useEffect(() => {
     setRows((prev) => {
       const next: Record<string, RowState> = {};
@@ -85,7 +82,6 @@ export function BatchList({
     });
   }, [items]);
 
-  // Revoke all object URLs on unmount.
   React.useEffect(() => {
     return () => {
       for (const r of Object.values(rows)) {
@@ -102,46 +98,54 @@ export function BatchList({
     (it) => rows[it.id]?.status === "done"
   ).length;
 
-  const extractAll = async () => {
+  const processRow = async (it: VideoItem, fmt: RowFormat) => {
+    setRow(it.id, { status: "working", progress: 0, error: null });
+    try {
+      let res: ExtractResult;
+      if (fmt === "vocals") {
+        const iso = await isolateVoice(it.file, {
+          onProgress: (r) => setRow(it.id, { progress: r }),
+        });
+        res = {
+          blob: iso.blob,
+          filename: iso.filename,
+          sizeBytes: iso.sizeBytes,
+          mime: iso.mime,
+        };
+      } else {
+        res = await extractAudio(it.file, {
+          format: fmt,
+          bitrate,
+          onProgress: (r) => setRow(it.id, { progress: r }),
+        });
+      }
+      const url = URL.createObjectURL(res.blob);
+      setRow(it.id, {
+        status: "done",
+        progress: 1,
+        result: res,
+        downloadUrl: url,
+        error: null,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Processing failed.";
+      setRow(it.id, { status: "error", error: msg });
+      onError(`${it.file.name}: ${msg}`);
+    }
+  };
+
+  const processAll = async () => {
     if (running) return;
     setRunning(true);
-    // Reset any errored/queued items.
     for (const it of items) {
       if (rows[it.id]?.status !== "done") {
         setRow(it.id, { status: "queued", progress: 0, error: null });
       }
     }
-
-    // Sequential through the warm singleton — ffmpeg.wasm drives a single
-    // wasm worker, so true parallelism would require a second ~30MB instance.
-    // Sequential keeps memory low and the UI never freezes (all async).
     for (const it of items) {
-      const st = rows[it.id];
-      if (st?.status === "done") continue;
-      setRow(it.id, { status: "extracting", progress: 0 });
-      try {
-        const res = await extractAudio(it.file, {
-          format: rows[it.id]?.format ?? "mp3",
-          bitrate,
-          onProgress: (r) => setRow(it.id, { progress: r }),
-        });
-        const url = URL.createObjectURL(res.blob);
-        setRow(it.id, {
-          status: "done",
-          progress: 1,
-          result: res,
-          downloadUrl: url,
-          error: null,
-        });
-      } catch (err) {
-        const msg =
-          err instanceof Error ? err.message : "Extraction failed.";
-        setRow(it.id, { status: "error", error: msg });
-        onError(`${it.file.name}: ${msg}`);
-      }
+      if (rows[it.id]?.status === "done") continue;
+      await processRow(it, rows[it.id]?.format ?? "mp3");
     }
-
-    // Free memory on mobile after the batch finishes.
     if (isMobile()) terminateFFmpeg();
     setRunning(false);
   };
@@ -163,28 +167,26 @@ export function BatchList({
   const anyDone = doneCount > 0;
 
   return (
-    <div className="flex h-full w-full flex-col gap-3 overflow-hidden p-3">
+    <div className="flex h-full w-full flex-col overflow-hidden">
       {/* toolbar */}
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2 border-b px-4 py-2.5">
         <Button
-          onClick={extractAll}
+          onClick={processAll}
           size="sm"
           disabled={running || items.length === 0}
-          className="h-8 bg-emerald-600 text-white hover:bg-emerald-700 dark:bg-emerald-600 dark:hover:bg-emerald-500"
+          className="h-8 gap-1.5 bg-foreground text-background hover:bg-foreground/90"
         >
           {running ? (
             <Loader2 className="size-3.5 animate-spin" />
-          ) : (
-            <Music className="size-3.5" />
-          )}
-          Extract All
+          ) : null}
+          Process All
         </Button>
         <Button
           onClick={downloadAll}
           size="sm"
           variant="outline"
           disabled={!anyDone || running}
-          className="h-8"
+          className="h-8 gap-1.5"
         >
           <Download className="size-3.5" />
           Download All
@@ -194,7 +196,7 @@ export function BatchList({
           size="sm"
           variant="outline"
           disabled={running}
-          className="h-8"
+          className="h-8 gap-1.5"
         >
           <Plus className="size-3.5" />
           Add
@@ -210,8 +212,8 @@ export function BatchList({
         </Button>
 
         <div className="ml-auto flex items-center gap-2">
-          <span className="text-xs text-muted-foreground">
-            MP3 bitrate
+          <span className="text-[11px] uppercase tracking-wider text-muted-foreground">
+            MP3 kbps
           </span>
           <ToggleGroup
             type="single"
@@ -226,7 +228,7 @@ export function BatchList({
                 key={b}
                 value={b}
                 variant="outline"
-                className="h-7 px-2 font-mono text-xs data-[state=on]:border-emerald-500 data-[state=on]:text-emerald-600 dark:data-[state=on]:text-emerald-400"
+                className="h-7 px-2 font-mono text-xs data-[state=on]:border-foreground data-[state=on]:text-foreground"
               >
                 {b}
               </ToggleGroupItem>
@@ -236,16 +238,18 @@ export function BatchList({
       </div>
 
       {running && (
-        <div className="flex items-center justify-between rounded-md border bg-muted/40 px-3 py-1.5 text-xs text-muted-foreground">
+        <div className="flex items-center justify-between border-b bg-muted/30 px-4 py-1.5 text-[11px] tabular-nums text-muted-foreground">
           <span>
             Processing {doneCount}/{items.length}…
           </span>
-          <span className="font-mono">{Math.round((doneCount / items.length) * 100)}%</span>
+          <span className="font-mono">
+            {Math.round((doneCount / items.length) * 100)}%
+          </span>
         </div>
       )}
 
-      {/* scrollable rows */}
-      <div className="voicerip-scroll min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
+      {/* rows */}
+      <div className="voicerip-scroll min-h-0 flex-1 overflow-y-auto">
         {items.map((it) => {
           const r = rows[it.id];
           if (!r) return null;
@@ -269,7 +273,7 @@ interface BatchRowProps {
   item: VideoItem;
   row: RowState;
   disabled: boolean;
-  onFormatChange: (f: AudioFormat) => void;
+  onFormatChange: (f: RowFormat) => void;
   onRemove: () => void;
 }
 
@@ -291,111 +295,115 @@ function BatchRow({
   };
 
   return (
-    <div className="flex flex-col gap-2 rounded-lg border bg-card p-2.5 sm:flex-row sm:items-center">
+    <div className="flex items-center gap-3 border-b px-4 py-2.5">
+      {/* status icon */}
+      <div
+        className={
+          "flex size-7 shrink-0 items-center justify-center rounded " +
+          (row.status === "done"
+            ? "bg-foreground text-background"
+            : "bg-muted text-muted-foreground")
+        }
+      >
+        {row.status === "done" ? (
+          <Check className="size-3.5" />
+        ) : row.status === "working" ? (
+          <Loader2 className="size-3.5 animate-spin" />
+        ) : (
+          <FileAudio className="size-3.5" />
+        )}
+      </div>
+
       {/* file info */}
-      <div className="flex min-w-0 flex-1 items-center gap-2.5">
-        <div
-          className={cn(
-            "flex size-8 shrink-0 items-center justify-center rounded-md",
-            row.status === "done"
-              ? "bg-emerald-600 text-white"
-              : "bg-muted text-muted-foreground"
-          )}
+      <div className="min-w-0 flex-1">
+        <p
+          className="truncate text-sm font-medium leading-tight"
+          title={item.file.name}
         >
-          {row.status === "done" ? (
-            <Check className="size-4" />
-          ) : row.status === "extracting" ? (
-            <Loader2 className="size-4 animate-spin" />
-          ) : (
-            <FileAudio className="size-4" />
+          {item.file.name}
+        </p>
+        <p className="mt-0.5 font-mono text-[11px] tabular-nums text-muted-foreground">
+          {formatBytes(item.file.size)}
+          {item.duration != null && (
+            <>
+              <span className="mx-1.5 opacity-50">/</span>
+              {formatDuration(item.duration)}
+            </>
           )}
-        </div>
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-medium" title={item.file.name}>
-            {item.file.name}
-          </p>
-          <p className="font-mono text-xs text-muted-foreground">
-            {formatBytes(item.file.size)}
-            {item.duration != null && (
-              <>
-                <span className="mx-1.5">·</span>
-                {formatDuration(item.duration)}
-              </>
-            )}
-          </p>
-        </div>
+        </p>
       </div>
 
-      {/* format */}
-      <div className="flex items-center gap-2">
-        <Select
-          value={row.format}
-          onValueChange={(v) => onFormatChange(v as AudioFormat)}
-          disabled={disabled}
-        >
-          <SelectTrigger className="h-8 w-[92px] font-mono text-xs">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="mp3" className="font-mono text-xs">
-              MP3
-            </SelectItem>
-            <SelectItem value="wav" className="font-mono text-xs">
-              WAV
-            </SelectItem>
-          </SelectContent>
-        </Select>
+      {/* format select */}
+      <Select
+        value={row.format}
+        onValueChange={(v) => onFormatChange(v as RowFormat)}
+        disabled={disabled}
+      >
+        <SelectTrigger className="h-8 w-[88px] shrink-0 font-mono text-xs">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="mp3" className="font-mono text-xs">
+            MP3
+          </SelectItem>
+          <SelectItem value="wav" className="font-mono text-xs">
+            WAV
+          </SelectItem>
+          <SelectItem value="vocals" className="font-mono text-xs">
+            VOCALS
+          </SelectItem>
+        </SelectContent>
+      </Select>
 
-        {/* status / progress */}
-        <div className="flex w-28 items-center">
-          {row.status === "extracting" ? (
-            <Progress
-              value={row.progress * 100}
-              className="h-1.5 [&_[data-slot=progress-indicator]]:bg-emerald-500"
-            />
-          ) : row.status === "done" ? (
-            <Badge
-              variant="secondary"
-              className="border-emerald-500/40 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300"
-            >
-              {formatBytes(row.result?.sizeBytes ?? 0)}
-            </Badge>
-          ) : row.status === "error" ? (
-            <Badge
-              variant="secondary"
-              className="bg-amber-50 text-amber-700 dark:bg-amber-950/30 dark:text-amber-300"
-              title={row.error ?? ""}
-            >
-              Error
-            </Badge>
-          ) : (
-            <Badge variant="secondary" className="font-mono text-xs">
-              Queued
-            </Badge>
-          )}
-        </div>
-
-        <Button
-          onClick={onDownload}
-          size="icon"
-          variant="outline"
-          className="size-8 shrink-0"
-          disabled={row.status !== "done"}
-          aria-label={`Download ${item.file.name}`}
-        >
-          <Download className="size-3.5" />
-        </Button>
-        <Button
-          onClick={onRemove}
-          size="icon"
-          variant="ghost"
-          className="size-8 shrink-0 text-muted-foreground"
-          disabled={disabled}
-          aria-label={`Remove ${item.file.name}`}
-        >
-          <X className="size-3.5" />
-        </Button>
+      {/* status */}
+      <div className="flex w-24 shrink-0 items-center">
+        {row.status === "working" ? (
+          <Progress
+            value={row.progress * 100}
+            className="h-1.5 [&_[data-slot=progress-indicator]]:bg-foreground"
+          />
+        ) : row.status === "done" ? (
+          <Badge
+            variant="secondary"
+            className="font-mono text-[11px] tabular-nums"
+          >
+            {formatBytes(row.result?.sizeBytes ?? 0)}
+          </Badge>
+        ) : row.status === "error" ? (
+          <Badge
+            variant="secondary"
+            className="bg-amber-50 text-[11px] text-amber-700 dark:bg-amber-950/30 dark:text-amber-300"
+            title={row.error ?? ""}
+          >
+            Error
+          </Badge>
+        ) : (
+          <Badge
+            variant="secondary"
+            className="font-mono text-[11px] text-muted-foreground"
+          >
+            Queued
+          </Badge>
+        )}
       </div>
+
+      {/* actions */}
+      <button
+        onClick={onDownload}
+        disabled={row.status !== "done"}
+        className="flex size-7 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-30"
+        aria-label={`Download ${item.file.name}`}
+      >
+        <Download className="size-3.5" />
+      </button>
+      <button
+        onClick={onRemove}
+        disabled={disabled}
+        className="flex size-7 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-30"
+        aria-label={`Remove ${item.file.name}`}
+      >
+        <X className="size-3.5" />
+      </button>
     </div>
   );
 }

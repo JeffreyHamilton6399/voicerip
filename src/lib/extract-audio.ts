@@ -243,17 +243,24 @@ export function probeDuration(file: File): Promise<number | null> {
 }
 
 export const ACCEPTED_EXTENSIONS = [
+  // video
   "mp4",
   "webm",
   "mov",
   "mkv",
   "avi",
   "ogv",
+  // audio
+  "mp3",
+  "wav",
+  "m4a",
+  "aac",
+  "flac",
   "ogg",
 ];
 
 export function isAcceptedFile(file: File): boolean {
   const ext = file.name.split(".").pop()?.toLowerCase();
   if (ext && ACCEPTED_EXTENSIONS.includes(ext)) return true;
-  return file.type.startsWith("video/");
+  return file.type.startsWith("video/") || file.type.startsWith("audio/");
 }
