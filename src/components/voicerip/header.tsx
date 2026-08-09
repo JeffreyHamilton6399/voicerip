@@ -2,17 +2,20 @@
 
 import * as React from "react";
 import { useTheme } from "next-themes";
-import { Heart, Settings2 } from "lucide-react";
+import { Heart, Moon, Settings2, Shield, FileText, Github } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
-  Dialog,
-  DialogContent,
-  DialogTrigger,
-} from "@/components/ui/dialog";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Logo } from "@/components/voicerip/logo";
 
 const DONATE_URL = "https://buymeacoffee.com/jeffreyscof";
+const GITHUB_URL = "https://github.com/JeffreyHamilton6399/voicerip";
 
 export function Header() {
   const { theme, setTheme } = useTheme();
@@ -30,65 +33,61 @@ export function Header() {
         </span>
       </div>
 
-      <div className="flex items-center gap-1">
+      <div className="flex items-center gap-1.5">
         <Button
-          variant="ghost"
+          variant="outline"
           size="sm"
           asChild
-          className="gap-1.5 px-2.5 text-muted-foreground hover:text-foreground"
+          className="h-8 gap-1.5 rounded-full border-rose-200 px-3 text-rose-600 hover:bg-rose-50 hover:text-rose-700 dark:border-rose-900 dark:text-rose-400 dark:hover:bg-rose-950/40"
         >
           <a href={DONATE_URL} target="_blank" rel="noopener noreferrer">
-            <Heart className="size-3.5 text-rose-600" />
-            <span className="hidden text-xs sm:inline">Donate</span>
+            <Heart className="size-3.5" />
+            <span className="text-xs">Donate</span>
           </a>
         </Button>
 
-        <Dialog>
-          <DialogTrigger asChild>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
             <Button
-              variant="ghost"
+              variant="outline"
               size="icon"
-              className="size-8 text-muted-foreground hover:text-foreground"
+              className="size-8 rounded-full"
             >
               <Settings2 className="size-4" />
             </Button>
-          </DialogTrigger>
-          <DialogContent className="sm:max-w-xs">
-            <div className="space-y-3">
-              <p className="text-sm font-medium">Theme</p>
-              <ToggleGroup
-                type="single"
-                value={mounted ? theme : "system"}
-                onValueChange={(v) => {
-                  if (v) setTheme(v);
-                }}
-                className="flex w-full"
-              >
-                <ToggleGroupItem
-                  value="light"
-                  variant="outline"
-                  className="h-8 flex-1 text-xs"
-                >
-                  Light
-                </ToggleGroupItem>
-                <ToggleGroupItem
-                  value="dark"
-                  variant="outline"
-                  className="h-8 flex-1 text-xs"
-                >
-                  Dark
-                </ToggleGroupItem>
-                <ToggleGroupItem
-                  value="system"
-                  variant="outline"
-                  className="h-8 flex-1 text-xs"
-                >
-                  System
-                </ToggleGroupItem>
-              </ToggleGroup>
-            </div>
-          </DialogContent>
-        </Dialog>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-48">
+            <DropdownMenuItem
+              onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+            >
+              <Moon className="size-4" />
+              <span>Dark mode</span>
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel className="text-xs text-muted-foreground">
+              Legal
+            </DropdownMenuLabel>
+            <DropdownMenuItem asChild>
+              <a href="#privacy">
+                <Shield className="size-4" />
+                <span>Privacy Policy</span>
+              </a>
+            </DropdownMenuItem>
+            <DropdownMenuItem asChild>
+              <a href="#terms">
+                <FileText className="size-4" />
+                <span>Terms of Service</span>
+              </a>
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem asChild>
+              <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer">
+                <Github className="size-4" />
+                <span>GitHub</span>
+              </a>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
     </header>
   );
