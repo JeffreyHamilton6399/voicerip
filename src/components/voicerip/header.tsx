@@ -25,9 +25,7 @@ export function Header() {
   return (
     <header className="flex h-14 shrink-0 items-center justify-between border-b px-4">
       <div className="flex items-center gap-2">
-        <div className="flex size-7 items-center justify-center rounded-md bg-foreground text-background">
-          <Logo className="size-4" />
-        </div>
+        <Logo className="size-5" />
         <span className="text-[15px] font-semibold tracking-tight">
           VoiceRip
         </span>
