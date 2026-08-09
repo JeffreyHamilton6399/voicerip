@@ -134,8 +134,7 @@ export function Dropzone({ onFiles, onError }: DropzoneProps) {
             Drop a video or audio file
           </h2>
           <p className="max-w-md text-sm text-muted-foreground">
-            Extract the audio track as MP3 or WAV, or isolate the vocals
-            from a stereo mix — all in your browser.
+            Extract the audio track as MP3 or WAV — privately in your browser.
           </p>
         </div>
 

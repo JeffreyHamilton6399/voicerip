@@ -23,16 +23,16 @@ import {
 import {
   extractAudio,
   terminateFFmpeg,
+  type AudioFormat,
   type ExtractResult,
   type Mp3Bitrate,
   type VideoItem,
 } from "@/lib/extract-audio";
-import { isolateVoice } from "@/lib/isolate-voice";
 import { isMobile } from "@/lib/mobile";
 import { formatBytes, formatDuration } from "@/lib/format";
 
-type RowFormat = "mp3" | "wav" | "vocals";
-type RowStatus = "queued" | "working" | "done" | "error";
+type RowFormat = "mp3" | "wav";
+type RowStatus = "queued" | "extracting" | "done" | "error";
 
 interface RowState {
   format: RowFormat;
@@ -99,26 +99,13 @@ export function BatchList({
   ).length;
 
   const processRow = async (it: VideoItem, fmt: RowFormat) => {
-    setRow(it.id, { status: "working", progress: 0, error: null });
+    setRow(it.id, { status: "extracting", progress: 0, error: null });
     try {
-      let res: ExtractResult;
-      if (fmt === "vocals") {
-        const iso = await isolateVoice(it.file, {
-          onProgress: (r) => setRow(it.id, { progress: r }),
-        });
-        res = {
-          blob: iso.blob,
-          filename: iso.filename,
-          sizeBytes: iso.sizeBytes,
-          mime: iso.mime,
-        };
-      } else {
-        res = await extractAudio(it.file, {
-          format: fmt,
-          bitrate,
-          onProgress: (r) => setRow(it.id, { progress: r }),
-        });
-      }
+      const res = await extractAudio(it.file, {
+        format: fmt,
+        bitrate,
+        onProgress: (r) => setRow(it.id, { progress: r }),
+      });
       const url = URL.createObjectURL(res.blob);
       setRow(it.id, {
         status: "done",
@@ -128,13 +115,13 @@ export function BatchList({
         error: null,
       });
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Processing failed.";
+      const msg = err instanceof Error ? err.message : "Extraction failed.";
       setRow(it.id, { status: "error", error: msg });
       onError(`${it.file.name}: ${msg}`);
     }
   };
 
-  const processAll = async () => {
+  const extractAll = async () => {
     if (running) return;
     setRunning(true);
     for (const it of items) {
@@ -171,15 +158,13 @@ export function BatchList({
       {/* toolbar */}
       <div className="flex flex-wrap items-center gap-2 border-b px-4 py-2.5">
         <Button
-          onClick={processAll}
+          onClick={extractAll}
           size="sm"
           disabled={running || items.length === 0}
           className="h-8 gap-1.5 bg-foreground text-background hover:bg-foreground/90"
         >
-          {running ? (
-            <Loader2 className="size-3.5 animate-spin" />
-          ) : null}
-          Process All
+          {running ? <Loader2 className="size-3.5 animate-spin" /> : null}
+          Extract All
         </Button>
         <Button
           onClick={downloadAll}
@@ -296,7 +281,6 @@ function BatchRow({
 
   return (
     <div className="flex items-center gap-3 border-b px-4 py-2.5">
-      {/* status icon */}
       <div
         className={
           "flex size-7 shrink-0 items-center justify-center rounded " +
@@ -307,14 +291,13 @@ function BatchRow({
       >
         {row.status === "done" ? (
           <Check className="size-3.5" />
-        ) : row.status === "working" ? (
+        ) : row.status === "extracting" ? (
           <Loader2 className="size-3.5 animate-spin" />
         ) : (
           <FileAudio className="size-3.5" />
         )}
       </div>
 
-      {/* file info */}
       <div className="min-w-0 flex-1">
         <p
           className="truncate text-sm font-medium leading-tight"
@@ -333,7 +316,6 @@ function BatchRow({
         </p>
       </div>
 
-      {/* format select */}
       <Select
         value={row.format}
         onValueChange={(v) => onFormatChange(v as RowFormat)}
@@ -349,24 +331,17 @@ function BatchRow({
           <SelectItem value="wav" className="font-mono text-xs">
             WAV
           </SelectItem>
-          <SelectItem value="vocals" className="font-mono text-xs">
-            VOCALS
-          </SelectItem>
         </SelectContent>
       </Select>
 
-      {/* status */}
       <div className="flex w-24 shrink-0 items-center">
-        {row.status === "working" ? (
+        {row.status === "extracting" ? (
           <Progress
             value={row.progress * 100}
             className="h-1.5 [&_[data-slot=progress-indicator]]:bg-foreground"
           />
         ) : row.status === "done" ? (
-          <Badge
-            variant="secondary"
-            className="font-mono text-[11px] tabular-nums"
-          >
+          <Badge variant="secondary" className="font-mono text-[11px] tabular-nums">
             {formatBytes(row.result?.sizeBytes ?? 0)}
           </Badge>
         ) : row.status === "error" ? (
@@ -387,7 +362,6 @@ function BatchRow({
         )}
       </div>
 
-      {/* actions */}
       <button
         onClick={onDownload}
         disabled={row.status !== "done"}
