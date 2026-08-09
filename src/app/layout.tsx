@@ -15,32 +15,32 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "VoiceRip — Extract audio from video, privately in your browser",
+  title: "VoiceRip — Separate vocals, drums & bass from any song",
   description:
-    "Drop a video, pick MP3 or WAV, download the audio. 100% client-side — your files never leave your device. No uploads, no sign-up, no server.",
+    "Extract audio or separate vocals, drums, bass and music from any song — right in your browser. 100% free, no sign-up, no uploads.",
   keywords: [
+    "vocal remover",
+    "stem separation",
     "audio extractor",
-    "video to mp3",
-    "video to wav",
-    "ffmpeg wasm",
-    "client-side audio",
-    "private audio extraction",
+    "spleeter",
+    "isolate vocals",
+    "remove vocals",
   ],
   authors: [{ name: "Jeffrey Hamilton" }],
   icons: {
     icon: "/favicon.svg",
   },
   openGraph: {
-    title: "VoiceRip — Extract audio from video, privately",
+    title: "VoiceRip — Separate vocals, drums & bass from any song",
     description:
-      "Drop a video, pick MP3 or WAV, download the audio. Your files never leave your device.",
+      "Extract audio or separate vocals, drums, bass and music from any song — right in your browser.",
     type: "website",
   },
   twitter: {
     card: "summary",
-    title: "VoiceRip — Extract audio from video, privately",
+    title: "VoiceRip — Separate vocals, drums & bass from any song",
     description:
-      "Drop a video, pick MP3 or WAV, download the audio. 100% client-side.",
+      "Extract audio or separate vocals, drums, bass and music. 100% client-side.",
   },
 };
 
@@ -66,7 +66,7 @@ export default function RootLayout({
       >
         <ThemeProvider
           attribute="class"
-          defaultTheme="dark"
+          defaultTheme="light"
           enableSystem
           disableTransitionOnChange
         >

@@ -65,3 +65,4 @@ server.log
 /db/
 /prompt
 /testupload/
+tool-results/

@@ -9,11 +9,11 @@ interface TrackCardProps {
   stem: StemResult;
 }
 
-const STEM_LABELS: Record<string, { label: string; color: string }> = {
-  vocals: { label: "Vocals", color: "bg-foreground" },
-  drums: { label: "Drums", color: "bg-foreground/70" },
-  bass: { label: "Bass", color: "bg-foreground/50" },
-  other: { label: "Music", color: "bg-foreground/85" },
+const STEM_LABELS: Record<string, { label: string }> = {
+  vocals: { label: "Vocals" },
+  drums: { label: "Drums" },
+  bass: { label: "Bass" },
+  other: { label: "Music" },
 };
 
 export function TrackCard({ stem }: TrackCardProps) {
@@ -50,15 +50,12 @@ export function TrackCard({ stem }: TrackCardProps) {
     a.remove();
   };
 
-  const meta = STEM_LABELS[stem.name] ?? {
-    label: stem.name,
-    color: "bg-foreground",
-  };
+  const meta = STEM_LABELS[stem.name] ?? { label: stem.name };
 
   return (
     <div className="flex items-center gap-3 rounded-lg border p-3">
       <div
-        className={`flex size-9 shrink-0 items-center justify-center rounded ${meta.color} text-background`}
+        className="flex size-9 shrink-0 items-center justify-center rounded bg-foreground text-background"
       >
         <button
           onClick={togglePlay}
