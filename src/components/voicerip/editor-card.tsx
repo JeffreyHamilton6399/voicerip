@@ -5,8 +5,8 @@ import {
   Clock,
   Download,
   FileAudio,
+  Layers,
   Music,
-  Plus,
   Scissors,
   X,
 } from "lucide-react";
@@ -21,6 +21,8 @@ import {
   type Mp3Bitrate,
   type VideoItem,
 } from "@/lib/extract-audio";
+import { separateAudio, type SeparateResult } from "@/lib/separate";
+import { TrackCard } from "@/components/voicerip/track-card";
 import {
   formatBytes,
   formatDuration,
@@ -28,7 +30,8 @@ import {
   parseTimestamp,
 } from "@/lib/format";
 
-type Status = "idle" | "extracting" | "done" | "error";
+type Mode = "extract" | "separate";
+type Status = "idle" | "working" | "done" | "error";
 
 const BITRATES: Mp3Bitrate[] = ["128k", "192k", "256k", "320k"];
 
@@ -45,13 +48,16 @@ export function EditorCard({
   onNewFile,
   onError,
 }: EditorCardProps) {
+  const [mode, setMode] = React.useState<Mode>("separate");
   const [format, setFormat] = React.useState<AudioFormat>("mp3");
   const [bitrate, setBitrate] = React.useState<Mp3Bitrate>("192k");
   const [startStr, setStartStr] = React.useState("");
   const [endStr, setEndStr] = React.useState("");
   const [status, setStatus] = React.useState<Status>("idle");
   const [progress, setProgress] = React.useState(0);
-  const [result, setResult] = React.useState<ExtractResult | null>(null);
+  const [stage, setStage] = React.useState("");
+  const [extractResult, setExtractResult] = React.useState<ExtractResult | null>(null);
+  const [separateResult, setSeparateResult] = React.useState<SeparateResult | null>(null);
   const [error, setError] = React.useState<string | null>(null);
 
   const downloadUrlRef = React.useRef<string | null>(null);
@@ -63,10 +69,19 @@ export function EditorCard({
   }, []);
 
   const duration = item.duration;
+  const working = status === "working";
+
+  const switchMode = (m: Mode) => {
+    setMode(m);
+    setStatus("idle");
+    setExtractResult(null);
+    setSeparateResult(null);
+    setError(null);
+  };
 
   const onExtract = async () => {
     setError(null);
-    setResult(null);
+    setExtractResult(null);
 
     const startSec = startStr.trim() ? parseTimestamp(startStr) : null;
     const endSec = endStr.trim() ? parseTimestamp(endStr) : null;
@@ -74,30 +89,22 @@ export function EditorCard({
     if (startStr.trim() && startSec === null) {
       setError("Start time must be HH:MM:SS.");
       setStatus("error");
-      onError("Start time must be HH:MM:SS.");
       return;
     }
     if (endStr.trim() && endSec === null) {
       setError("End time must be HH:MM:SS.");
       setStatus("error");
-      onError("End time must be HH:MM:SS.");
       return;
     }
     if (startSec != null && endSec != null && endSec <= startSec) {
       setError("End must be after start.");
       setStatus("error");
-      onError("End must be after start.");
-      return;
-    }
-    if (duration != null && startSec != null && startSec >= duration) {
-      setError("Start is past the end.");
-      setStatus("error");
-      onError("Start is past the end.");
       return;
     }
 
-    setStatus("extracting");
+    setStatus("working");
     setProgress(0);
+    setStage("Extracting…");
 
     try {
       const res = await extractAudio(item.file, {
@@ -109,29 +116,64 @@ export function EditorCard({
       });
       if (downloadUrlRef.current) URL.revokeObjectURL(downloadUrlRef.current);
       downloadUrlRef.current = URL.createObjectURL(res.blob);
-      setResult(res);
+      setExtractResult(res);
       setStatus("done");
-      setProgress(1);
     } catch (err) {
       console.error(err);
-      const msg =
-        err instanceof Error
-          ? err.message
-          : "Extraction failed.";
+      const msg = err instanceof Error ? err.message : "Extraction failed.";
       setError(msg);
       setStatus("error");
       onError(msg);
     }
   };
 
-  const onDownload = () => {
-    if (!result || !downloadUrlRef.current) return;
+  const onSeparate = async () => {
+    setError(null);
+    setSeparateResult(null);
+    setStatus("working");
+    setProgress(0);
+    setStage("Loading models…");
+
+    try {
+      const res = await separateAudio(item.file, {
+        onProgress: (r, s) => {
+          setProgress(r);
+          setStage(s);
+        },
+      });
+      setSeparateResult(res);
+      setStatus("done");
+    } catch (err) {
+      console.error(err);
+      const msg = err instanceof Error ? err.message : "Separation failed.";
+      setError(msg);
+      setStatus("error");
+      onError(msg);
+    }
+  };
+
+  const onDownloadExtract = () => {
+    if (!extractResult || !downloadUrlRef.current) return;
     const a = document.createElement("a");
     a.href = downloadUrlRef.current;
-    a.download = result.filename;
+    a.download = extractResult.filename;
     document.body.appendChild(a);
     a.click();
     a.remove();
+  };
+
+  const downloadAllStems = () => {
+    if (!separateResult) return;
+    for (const stem of separateResult.stems) {
+      const url = URL.createObjectURL(stem.blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = stem.filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
   };
 
   const useFullDuration = () => {
@@ -139,10 +181,9 @@ export function EditorCard({
     setEndStr(duration != null ? formatHHMMSS(duration) : "");
   };
 
-  const extracting = status === "extracting";
-
   return (
     <div className="flex h-full w-full flex-col overflow-y-auto">
+      {/* File info bar */}
       <div className="flex items-center gap-3 border-b px-4 py-3">
         <div className="flex size-8 shrink-0 items-center justify-center rounded bg-foreground text-background">
           <FileAudio className="size-4" />
@@ -163,7 +204,7 @@ export function EditorCard({
         </div>
         <button
           onClick={onRemove}
-          disabled={extracting}
+          disabled={working}
           className="flex size-7 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
           aria-label="Remove file"
         >
@@ -172,117 +213,153 @@ export function EditorCard({
       </div>
 
       <div className="flex flex-1 flex-col gap-4 p-4">
-        <div className="grid grid-cols-2 gap-3">
-          <ToggleGroup
-            type="single"
-            value={format}
-            onValueChange={(v) => {
-              if (v) setFormat(v as AudioFormat);
-            }}
-            className="flex w-full"
+        {/* Mode toggle */}
+        <ToggleGroup
+          type="single"
+          value={mode}
+          onValueChange={(v) => v && switchMode(v as Mode)}
+          className="grid w-full grid-cols-2"
+        >
+          <ToggleGroupItem
+            value="separate"
+            variant="outline"
+            className="h-9 gap-1.5 data-[state=on]:border-foreground data-[state=on]:bg-foreground data-[state=on]:text-background"
           >
-            <ToggleGroupItem
-              value="mp3"
-              variant="outline"
-              className="h-8 flex-1 font-mono text-xs data-[state=on]:border-foreground data-[state=on]:text-foreground"
-            >
-              MP3
-            </ToggleGroupItem>
-            <ToggleGroupItem
-              value="wav"
-              variant="outline"
-              className="h-8 flex-1 font-mono text-xs data-[state=on]:border-foreground data-[state=on]:text-foreground"
-            >
-              WAV
-            </ToggleGroupItem>
-          </ToggleGroup>
+            <Layers className="size-3.5" />
+            <span className="text-xs font-medium">Separate</span>
+          </ToggleGroupItem>
+          <ToggleGroupItem
+            value="extract"
+            variant="outline"
+            className="h-9 gap-1.5 data-[state=on]:border-foreground data-[state=on]:bg-foreground data-[state=on]:text-background"
+          >
+            <Music className="size-3.5" />
+            <span className="text-xs font-medium">Extract</span>
+          </ToggleGroupItem>
+        </ToggleGroup>
 
-          {format === "mp3" ? (
-            <ToggleGroup
-              type="single"
-              value={bitrate}
-              onValueChange={(v) => {
-                if (v) setBitrate(v as Mp3Bitrate);
-              }}
-              className="flex w-full"
-            >
-              {BITRATES.map((b) => (
+        {/* Extract mode options */}
+        {mode === "extract" && (
+          <>
+            <div className="grid grid-cols-2 gap-3">
+              <ToggleGroup
+                type="single"
+                value={format}
+                onValueChange={(v) => v && setFormat(v as AudioFormat)}
+                className="flex w-full"
+              >
                 <ToggleGroupItem
-                  key={b}
-                  value={b}
+                  value="mp3"
                   variant="outline"
                   className="h-8 flex-1 font-mono text-xs data-[state=on]:border-foreground data-[state=on]:text-foreground"
                 >
-                  {b}
+                  MP3
                 </ToggleGroupItem>
-              ))}
-            </ToggleGroup>
-          ) : (
-            <div className="flex h-8 items-center justify-center rounded-md border border-dashed font-mono text-xs text-muted-foreground">
-              PCM
-            </div>
-          )}
-        </div>
+                <ToggleGroupItem
+                  value="wav"
+                  variant="outline"
+                  className="h-8 flex-1 font-mono text-xs data-[state=on]:border-foreground data-[state=on]:text-foreground"
+                >
+                  WAV
+                </ToggleGroupItem>
+              </ToggleGroup>
 
-        <div>
-          <div className="mb-2 flex items-center justify-between">
-            <span className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-              <Scissors className="size-3" />
-              Trim
-            </span>
-            <button
-              onClick={useFullDuration}
-              disabled={extracting || duration == null}
-              className="text-[11px] text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
-            >
-              Full
-            </button>
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            <div className="relative">
-              <Clock className="pointer-events-none absolute left-2.5 top-1/2 size-3 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                value={startStr}
-                onChange={(e) => setStartStr(e.target.value)}
-                placeholder="00:00:00"
-                disabled={extracting}
-                className="h-8 pl-7 font-mono text-xs tabular-nums"
-                aria-label="Start"
-              />
+              {format === "mp3" ? (
+                <ToggleGroup
+                  type="single"
+                  value={bitrate}
+                  onValueChange={(v) => v && setBitrate(v as Mp3Bitrate)}
+                  className="flex w-full"
+                >
+                  {BITRATES.map((b) => (
+                    <ToggleGroupItem
+                      key={b}
+                      value={b}
+                      variant="outline"
+                      className="h-8 flex-1 font-mono text-xs data-[state=on]:border-foreground data-[state=on]:text-foreground"
+                    >
+                      {b}
+                    </ToggleGroupItem>
+                  ))}
+                </ToggleGroup>
+              ) : (
+                <div className="flex h-8 items-center justify-center rounded-md border border-dashed font-mono text-xs text-muted-foreground">
+                  PCM
+                </div>
+              )}
             </div>
-            <div className="relative">
-              <Clock className="pointer-events-none absolute left-2.5 top-1/2 size-3 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                value={endStr}
-                onChange={(e) => setEndStr(e.target.value)}
-                placeholder={duration != null ? formatHHMMSS(duration) : "00:00:00"}
-                disabled={extracting}
-                className="h-8 pl-7 font-mono text-xs tabular-nums"
-                aria-label="End"
-              />
-            </div>
-          </div>
-        </div>
 
+            <div>
+              <div className="mb-2 flex items-center justify-between">
+                <span className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                  <Scissors className="size-3" />
+                  Trim
+                </span>
+                <button
+                  onClick={useFullDuration}
+                  disabled={working || duration == null}
+                  className="text-[11px] text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
+                >
+                  Full
+                </button>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="relative">
+                  <Clock className="pointer-events-none absolute left-2.5 top-1/2 size-3 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    value={startStr}
+                    onChange={(e) => setStartStr(e.target.value)}
+                    placeholder="00:00:00"
+                    disabled={working}
+                    className="h-8 pl-7 font-mono text-xs tabular-nums"
+                    aria-label="Start"
+                  />
+                </div>
+                <div className="relative">
+                  <Clock className="pointer-events-none absolute left-2.5 top-1/2 size-3 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    value={endStr}
+                    onChange={(e) => setEndStr(e.target.value)}
+                    placeholder={duration != null ? formatHHMMSS(duration) : "00:00:00"}
+                    disabled={working}
+                    className="h-8 pl-7 font-mono text-xs tabular-nums"
+                    aria-label="End"
+                  />
+                </div>
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* Action / progress */}
         <div className="mt-auto">
-          {extracting ? (
+          {working ? (
             <div className="space-y-2">
               <Progress
                 value={progress * 100}
                 className="h-1.5 [&_[data-slot=progress-indicator]]:bg-foreground"
               />
               <p className="text-center font-mono text-[11px] tabular-nums text-muted-foreground">
-                {Math.round(progress * 100)}%
+                {stage} {Math.round(progress * 100)}%
               </p>
             </div>
           ) : (
             <Button
-              onClick={onExtract}
+              onClick={mode === "separate" ? onSeparate : onExtract}
               size="lg"
               className="h-10 w-full gap-2 bg-foreground text-background hover:bg-foreground/90"
             >
-              <Music className="size-4" />
-              Extract Audio
+              {mode === "separate" ? (
+                <>
+                  <Layers className="size-4" />
+                  Separate Audio
+                </>
+              ) : (
+                <>
+                  <Music className="size-4" />
+                  Extract Audio
+                </>
+              )}
             </Button>
           )}
         </div>
@@ -293,17 +370,18 @@ export function EditorCard({
           </p>
         )}
 
-        {status === "done" && result && (
+        {/* Extract result */}
+        {mode === "extract" && status === "done" && extractResult && (
           <div className="flex items-center gap-3 border-l-2 border-foreground bg-muted/40 px-3 py-2.5">
             <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-medium leading-tight" title={result.filename}>
-                {result.filename}
+              <p className="truncate text-sm font-medium leading-tight" title={extractResult.filename}>
+                {extractResult.filename}
               </p>
               <p className="mt-0.5 font-mono text-[11px] tabular-nums text-muted-foreground">
-                {formatBytes(result.sizeBytes)} · {format.toUpperCase()}
+                {formatBytes(extractResult.sizeBytes)} · {format.toUpperCase()}
               </p>
             </div>
-            <Button onClick={onDownload} size="sm" className="h-8 shrink-0 gap-1.5">
+            <Button onClick={onDownloadExtract} size="sm" className="h-8 shrink-0 gap-1.5">
               <Download className="size-3.5" />
               Download
             </Button>
@@ -312,8 +390,26 @@ export function EditorCard({
               className="flex size-8 shrink-0 items-center justify-center rounded-md border text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
               aria-label="New file"
             >
-              <Plus className="size-4" />
+              <X className="size-4" />
             </button>
+          </div>
+        )}
+
+        {/* Separate results — track cards */}
+        {mode === "separate" && status === "done" && separateResult && (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                {separateResult.stems.length} tracks
+              </span>
+              <Button onClick={downloadAllStems} size="sm" variant="outline" className="h-7 gap-1.5 text-xs">
+                <Download className="size-3" />
+                Download All
+              </Button>
+            </div>
+            {separateResult.stems.map((stem) => (
+              <TrackCard key={stem.name} stem={stem} />
+            ))}
           </div>
         )}
       </div>
