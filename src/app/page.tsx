@@ -12,48 +12,20 @@ import {
   probeDuration,
   type VideoItem,
 } from "@/lib/extract-audio";
-import { isMobile } from "@/lib/mobile";
 import { ACCEPTED_EXTENSIONS } from "@/lib/extract-audio";
+import { isMobile } from "@/lib/mobile";
 
 export default function Page() {
   const [items, setItems] = React.useState<VideoItem[]>([]);
-  const [debug, setDebug] = React.useState(false);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
-  // Persist debug flag + mirror to window for the ffmpeg log gate.
-  React.useEffect(() => {
-    const saved = localStorage.getItem("voicerip.debug");
-    const initial = saved === "1";
-    setDebug(initial);
-    if (typeof window !== "undefined") {
-      (window as unknown as { __VR_DEBUG?: boolean }).__VR_DEBUG = initial;
-    }
-  }, []);
-
-  React.useEffect(() => {
-    localStorage.setItem("voicerip.debug", debug ? "1" : "0");
-    if (typeof window !== "undefined") {
-      (window as unknown as { __VR_DEBUG?: boolean }).__VR_DEBUG = debug;
-    }
-  }, [debug]);
-
-  // Pre-warm ffmpeg.wasm on desktop so the first extraction is instant.
-  // Skip on mobile to avoid holding ~30MB of wasm memory unnecessarily.
+  // Pre-warm ffmpeg on desktop.
   React.useEffect(() => {
     if (isMobile()) return;
-    let cancelled = false;
-    getFFmpeg().catch((err) => {
-      if (!cancelled) {
-        console.warn("ffmpeg prewarm failed (will retry on extract):", err);
-      }
-    });
-    return () => {
-      cancelled = true;
-    };
+    getFFmpeg().catch(() => {});
   }, []);
 
   const handleFiles = React.useCallback(async (files: File[]) => {
-    // Probe durations in parallel (best-effort, resolves null if unsupported).
     const probed = await Promise.all(
       files.map(async (file) => {
         const duration = await probeDuration(file).catch(() => null);
@@ -77,12 +49,9 @@ export default function Page() {
     setItems((prev) => prev.filter((it) => it.id !== id));
   }, []);
 
-  const clearAll = React.useCallback(() => {
-    setItems([]);
-  }, []);
+  const clearAll = React.useCallback(() => setItems([]), []);
 
   const newFile = React.useCallback(() => {
-    // "New file" from the single-file result → start fresh.
     setItems([]);
     fileInputRef.current?.click();
   }, []);
@@ -99,11 +68,10 @@ export default function Page() {
   };
 
   const single = items.length === 1;
-  const batch = items.length > 1;
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden bg-background text-foreground">
-      <Header debug={debug} onDebugChange={setDebug} />
+      <Header debug={false} onDebugChange={() => {}} />
 
       <main className="flex min-h-0 flex-1 flex-col">
         {items.length === 0 ? (
@@ -130,13 +98,10 @@ export default function Page() {
 
       <Footer />
 
-      {/* Hidden picker used by "Add" (batch) and "New file" (single result). */}
       <input
         ref={fileInputRef}
         type="file"
-        accept={
-          ACCEPTED_EXTENSIONS.map((e) => `.${e}`).join(",") + ",video/*"
-        }
+        accept={ACCEPTED_EXTENSIONS.map((e) => `.${e}`).join(",") + ",video/*,audio/*"}
         multiple
         className="sr-only"
         onChange={onPickMore}

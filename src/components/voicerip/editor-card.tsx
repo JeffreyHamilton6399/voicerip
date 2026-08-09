@@ -14,7 +14,6 @@ import { Button } from "@/components/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Progress } from "@/components/ui/progress";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   extractAudio,
   type AudioFormat,
@@ -85,15 +84,15 @@ export function EditorCard({
       return;
     }
     if (startSec != null && endSec != null && endSec <= startSec) {
-      setError("End time must be after the start time.");
+      setError("End must be after start.");
       setStatus("error");
-      onError("End time must be after the start time.");
+      onError("End must be after start.");
       return;
     }
     if (duration != null && startSec != null && startSec >= duration) {
-      setError("Start time is past the end of the video.");
+      setError("Start is past the end.");
       setStatus("error");
-      onError("Start time is past the end of the video.");
+      onError("Start is past the end.");
       return;
     }
 
@@ -118,7 +117,7 @@ export function EditorCard({
       const msg =
         err instanceof Error
           ? err.message
-          : "Audio extraction failed. Try a smaller file or a different format.";
+          : "Extraction failed.";
       setError(msg);
       setStatus("error");
       onError(msg);
@@ -144,16 +143,12 @@ export function EditorCard({
 
   return (
     <div className="flex h-full w-full flex-col overflow-y-auto">
-      {/* File info bar */}
       <div className="flex items-center gap-3 border-b px-4 py-3">
         <div className="flex size-8 shrink-0 items-center justify-center rounded bg-foreground text-background">
           <FileAudio className="size-4" />
         </div>
         <div className="min-w-0 flex-1">
-          <p
-            className="truncate text-sm font-medium leading-tight"
-            title={item.file.name}
-          >
+          <p className="truncate text-sm font-medium leading-tight" title={item.file.name}>
             {item.file.name}
           </p>
           <p className="mt-0.5 font-mono text-[11px] tabular-nums text-muted-foreground">
@@ -176,89 +171,71 @@ export function EditorCard({
         </button>
       </div>
 
-      {/* Body */}
-      <div className="flex flex-1 flex-col gap-5 p-4">
-        {/* Format + quality */}
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <div>
-            <Label className="mb-2 block text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-              Format
-            </Label>
+      <div className="flex flex-1 flex-col gap-4 p-4">
+        <div className="grid grid-cols-2 gap-3">
+          <ToggleGroup
+            type="single"
+            value={format}
+            onValueChange={(v) => {
+              if (v) setFormat(v as AudioFormat);
+            }}
+            className="flex w-full"
+          >
+            <ToggleGroupItem
+              value="mp3"
+              variant="outline"
+              className="h-8 flex-1 font-mono text-xs data-[state=on]:border-foreground data-[state=on]:text-foreground"
+            >
+              MP3
+            </ToggleGroupItem>
+            <ToggleGroupItem
+              value="wav"
+              variant="outline"
+              className="h-8 flex-1 font-mono text-xs data-[state=on]:border-foreground data-[state=on]:text-foreground"
+            >
+              WAV
+            </ToggleGroupItem>
+          </ToggleGroup>
+
+          {format === "mp3" ? (
             <ToggleGroup
               type="single"
-              value={format}
+              value={bitrate}
               onValueChange={(v) => {
-                if (v) setFormat(v as AudioFormat);
+                if (v) setBitrate(v as Mp3Bitrate);
               }}
               className="flex w-full"
             >
-              <ToggleGroupItem
-                value="mp3"
-                variant="outline"
-                className="h-8 flex-1 font-mono text-xs data-[state=on]:border-foreground data-[state=on]:text-foreground"
-              >
-                MP3
-              </ToggleGroupItem>
-              <ToggleGroupItem
-                value="wav"
-                variant="outline"
-                className="h-8 flex-1 font-mono text-xs data-[state=on]:border-foreground data-[state=on]:text-foreground"
-              >
-                WAV
-              </ToggleGroupItem>
+              {BITRATES.map((b) => (
+                <ToggleGroupItem
+                  key={b}
+                  value={b}
+                  variant="outline"
+                  className="h-8 flex-1 font-mono text-xs data-[state=on]:border-foreground data-[state=on]:text-foreground"
+                >
+                  {b}
+                </ToggleGroupItem>
+              ))}
             </ToggleGroup>
-          </div>
-
-          <div>
-            <Label className="mb-2 block text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-              Bitrate
-              {format === "wav" && (
-                <span className="ml-1 normal-case tracking-normal text-muted-foreground/60">
-                  lossless
-                </span>
-              )}
-            </Label>
-            {format === "mp3" ? (
-              <ToggleGroup
-                type="single"
-                value={bitrate}
-                onValueChange={(v) => {
-                  if (v) setBitrate(v as Mp3Bitrate);
-                }}
-                className="flex w-full"
-              >
-                {BITRATES.map((b) => (
-                  <ToggleGroupItem
-                    key={b}
-                    value={b}
-                    variant="outline"
-                    className="h-8 flex-1 font-mono text-xs data-[state=on]:border-foreground data-[state=on]:text-foreground"
-                  >
-                    {b}
-                  </ToggleGroupItem>
-                ))}
-              </ToggleGroup>
-            ) : (
-              <div className="flex h-8 items-center rounded-md border border-dashed px-3 font-mono text-xs text-muted-foreground">
-                PCM 16-bit
-              </div>
-            )}
-          </div>
+          ) : (
+            <div className="flex h-8 items-center justify-center rounded-md border border-dashed font-mono text-xs text-muted-foreground">
+              PCM
+            </div>
+          )}
         </div>
 
-        {/* Trim */}
         <div>
           <div className="mb-2 flex items-center justify-between">
-            <Label className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+            <span className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
               <Scissors className="size-3" />
               Trim
-            </Label>
+            </span>
             <button
               onClick={useFullDuration}
               disabled={extracting || duration == null}
               className="text-[11px] text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
             >
-              Use full duration
+              Full
             </button>
           </div>
           <div className="grid grid-cols-2 gap-2">
@@ -269,8 +246,8 @@ export function EditorCard({
                 onChange={(e) => setStartStr(e.target.value)}
                 placeholder="00:00:00"
                 disabled={extracting}
-                className="h-8 border-border pl-7 font-mono text-xs tabular-nums"
-                aria-label="Trim start time"
+                className="h-8 pl-7 font-mono text-xs tabular-nums"
+                aria-label="Start"
               />
             </div>
             <div className="relative">
@@ -278,18 +255,15 @@ export function EditorCard({
               <Input
                 value={endStr}
                 onChange={(e) => setEndStr(e.target.value)}
-                placeholder={
-                  duration != null ? formatHHMMSS(duration) : "00:00:00"
-                }
+                placeholder={duration != null ? formatHHMMSS(duration) : "00:00:00"}
                 disabled={extracting}
-                className="h-8 border-border pl-7 font-mono text-xs tabular-nums"
-                aria-label="Trim end time"
+                className="h-8 pl-7 font-mono text-xs tabular-nums"
+                aria-label="End"
               />
             </div>
           </div>
         </div>
 
-        {/* Action / progress */}
         <div className="mt-auto">
           {extracting ? (
             <div className="space-y-2">
@@ -297,8 +271,8 @@ export function EditorCard({
                 value={progress * 100}
                 className="h-1.5 [&_[data-slot=progress-indicator]]:bg-foreground"
               />
-              <p className="text-center text-[11px] tabular-nums text-muted-foreground">
-                Extracting… {Math.round(progress * 100)}%
+              <p className="text-center font-mono text-[11px] tabular-nums text-muted-foreground">
+                {Math.round(progress * 100)}%
               </p>
             </div>
           ) : (
@@ -313,32 +287,23 @@ export function EditorCard({
           )}
         </div>
 
-        {/* Error */}
         {error && (
           <p className="rounded-md border border-amber-500/30 bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:bg-amber-950/20 dark:text-amber-300">
             {error}
           </p>
         )}
 
-        {/* Result */}
         {status === "done" && result && (
           <div className="flex items-center gap-3 border-l-2 border-foreground bg-muted/40 px-3 py-2.5">
             <div className="min-w-0 flex-1">
-              <p
-                className="truncate text-sm font-medium leading-tight"
-                title={result.filename}
-              >
+              <p className="truncate text-sm font-medium leading-tight" title={result.filename}>
                 {result.filename}
               </p>
               <p className="mt-0.5 font-mono text-[11px] tabular-nums text-muted-foreground">
                 {formatBytes(result.sizeBytes)} · {format.toUpperCase()}
               </p>
             </div>
-            <Button
-              onClick={onDownload}
-              size="sm"
-              className="h-8 shrink-0 gap-1.5"
-            >
+            <Button onClick={onDownload} size="sm" className="h-8 shrink-0 gap-1.5">
               <Download className="size-3.5" />
               Download
             </Button>
