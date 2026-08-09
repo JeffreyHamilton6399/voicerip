@@ -1,36 +1,27 @@
 /**
- * Voice isolation via STFT spectral masking.
+ * Voice isolation via STFT spectral processing.
  *
- * This is real frequency-domain DSP — the same approach professional
- * karaoke and vocal-isolation plugins used before ML models (Demucs,
- * Spleeter) took over. It genuinely removes most of the music:
+ * Pipeline (all client-side, no ML model):
+ *  1. Decode audio (extract WAV first if the input is a video).
+ *  2. Compute mid = (L+R)/2 and side = (L-R)/2 channels.
+ *  3. STFT both into spectrograms (Hann window, 75% overlap).
+ *  4. Per-bin Wiener soft mask from mid/side magnitudes.
+ *  5. Vocal-band spectral gate: hard-cut below 100 Hz and above 8 kHz,
+ *     soft rolloff at edges. Vocals live in 150–5000 Hz.
+ *  6. HPSS: horizontal median filter (width 17) suppresses percussive
+ *      transients (drums) while preserving harmonic vocal ridges.
+ *  7. ISTFT with overlap-add + COLA normalization.
+ *  8. EQ chain via OfflineAudioContext.
  *
- *   1. Decode audio (extract WAV first if the input is a video).
- *   2. Compute mid = (L+R)/2 and side = (L-R)/2 channels.
- *   3. STFT both into time-frequency spectrograms (Hann window, 75% overlap).
- *   4. Per-frequency-bin Wiener soft mask:
- *        mask = mid_mag² / (mid_mag² + side_mag² + ε)
- *      Center-panned vocals have high mid / low side → mask ≈ 1 (kept).
- *      Side-panned instruments (guitars, synths, cymbals) have high side
- *      → mask ≈ 0 (removed). No floor — aggressive removal.
- *      The mask is sharpened (mask^p) to push it toward hard 0/1.
- *   5. Harmonic-percussive separation via horizontal median filtering:
- *      drums are broadband vertical transients; vocals are stable horizontal
- *      harmonic ridges. Median-filtering across time per bin suppresses
- *      the transients, keeping the vocal harmonics.
- *   6. ISTFT with overlap-add → isolated vocal signal.
- *   7. EQ chain via OfflineAudioContext: high-pass 90 Hz, low-pass 9 kHz,
- *      presence boost, de-ess, compressor.
+ * What this removes:
+ *   - Bass, sub-bass, kick drum (< 100 Hz)
+ *   - Cymbals, hi-hats, air (> 8 kHz)
+ *   - Side-panned instruments (guitars, synths panned L/R)
+ *   - Percussive transients (drums) via HPSS
  *
- * What this removes well:
- *   - Side-panned instruments (guitars, synths, keyboards panned L/R)
- *   - Cymbals, hi-hats, most percussion (broadband + high-freq)
- *   - Sub-bass and air above 9 kHz
- *
- * What still leaks (honest limit of DSP):
- *   - Center-panned melodic instruments (piano, center lead guitar) —
- *     they look spectrally identical to vocals.
- *   - Kick drum + bass if they're dead-center (no side energy to mask them).
+ * What still leaks (honest DSP limit):
+ *   - Center-panned melodic instruments (piano, center lead guitar)
+ *     — spectrally identical to vocals.
  *
  * For ML-grade separation (Demucs/Spleeter), a ~30-80 MB model download
  * is required — not done here to keep the app lightweight and offline.
@@ -51,8 +42,7 @@ export interface IsolateResult {
 
 const FFT_SIZE = 2048;
 const HOP_SIZE = 512; // 75% overlap — satisfies COLA for Hann window
-const SHARPEN = 1.8; // mask exponent; >1 = more aggressive removal
-const MEDIAN_FILTER_WIDTH = 9; // time-axis median filter (HPSS) — odd
+const HPSS_WIDTH = 17; // median filter width (time axis) — odd
 const EPS = 1e-10;
 
 const VIDEO_RE = /\.(mp4|webm|mov|mkv|avi|ogv|m4v)$/i;
@@ -66,7 +56,7 @@ function baseName(filename: string): string {
 
 /**
  * In-place iterative radix-2 Cooley-Tukey FFT on Float32Array pairs.
- * n must be a power of two. Operates on interleaved real/imag arrays.
+ * n must be a power of two.
  */
 function fft(re: Float32Array, im: Float32Array, inverse: boolean): void {
   const n = re.length;
@@ -134,100 +124,114 @@ function hannWindow(n: number): Float32Array {
 }
 
 /* -------------------------------- STFT ----------------------------------- */
+// bins = n/2 + 1 (includes DC and Nyquist — correct for real signals)
 
 interface Spectrogram {
-  /** frames × bins, magnitude. */
-  mag: Float32Array;
-  /** frames × bins, phase. */
-  phase: Float32Array;
+  re: Float32Array; // frames × bins, real part
+  im: Float32Array; // frames × bins, imag part
   frames: number;
   bins: number;
 }
 
 function stft(signal: Float32Array, window: Float32Array): Spectrogram {
   const n = FFT_SIZE;
-  const bins = n >> 1; // use only first half (real signal → Hermitian symmetry)
+  const bins = (n >> 1) + 1;
   const frames = Math.max(0, Math.floor((signal.length - n) / HOP_SIZE) + 1);
 
-  const mag = new Float32Array(frames * bins);
-  const phase = new Float32Array(frames * bins);
+  const re = new Float32Array(frames * bins);
+  const im = new Float32Array(frames * bins);
 
-  const re = new Float32Array(n);
-  const im = new Float32Array(n);
+  const fre = new Float32Array(n);
+  const fim = new Float32Array(n);
 
   for (let f = 0; f < frames; f++) {
     const start = f * HOP_SIZE;
     for (let i = 0; i < n; i++) {
-      re[i] = signal[start + i] * window[i];
-      im[i] = 0;
+      fre[i] = signal[start + i] * window[i];
+      fim[i] = 0;
     }
-    fft(re, im, false);
+    fft(fre, fim, false);
+    // For a real input, FFT output satisfies Hermitian symmetry.
+    // We only need bins 0..n/2 (DC to Nyquist).
     for (let b = 0; b < bins; b++) {
-      const r = re[b];
-      const imv = im[b];
-      mag[f * bins + b] = Math.sqrt(r * r + imv * imv);
-      phase[f * bins + b] = Math.atan2(imv, r);
+      re[f * bins + b] = fre[b];
+      im[f * bins + b] = fim[b];
     }
   }
 
-  return { mag, phase, frames, bins };
+  return { re, im, frames, bins };
 }
 
 /* -------------------------------- ISTFT ---------------------------------- */
 
-function istft(spec: Spectrogram, window: Float32Array, length: number): Float32Array {
-  const { mag, phase, frames, bins } = spec;
+function istft(
+  spec: Spectrogram,
+  window: Float32Array,
+  length: number
+): Float32Array {
+  const { re: specRe, im: specIm, frames, bins } = spec;
   const n = FFT_SIZE;
   const out = new Float32Array(length);
-  const norm = new Float32Array(length); // window overlap accumulator for COLA
+  const norm = new Float32Array(length);
 
-  const re = new Float32Array(n);
-  const im = new Float32Array(n);
+  const fre = new Float32Array(n);
+  const fim = new Float32Array(n);
 
   for (let f = 0; f < frames; f++) {
-    // Reconstruct the half-spectrum, mirror for Hermitian symmetry.
+    // Reconstruct the full n-length spectrum from the half-spectrum.
     for (let b = 0; b < bins; b++) {
-      const m = mag[f * bins + b];
-      const p = phase[f * bins + b];
-      re[b] = m * Math.cos(p);
-      im[b] = m * Math.sin(p);
-      if (b > 0 && b < bins) {
-        re[n - b] = re[b];
-        im[n - b] = -im[b];
-      }
+      fre[b] = specRe[f * bins + b];
+      fim[b] = specIm[f * bins + b];
+    }
+    // Mirror bins 1..n/2-1 to satisfy Hermitian symmetry: X[n-k] = conj(X[k]).
+    const half = n >> 1;
+    for (let b = 1; b < half; b++) {
+      fre[n - b] = fre[b];
+      fim[n - b] = -fim[b];
     }
 
-    fft(re, im, true);
+    fft(fre, fim, true); // inverse FFT
 
     const start = f * HOP_SIZE;
     for (let i = 0; i < n && start + i < length; i++) {
-      out[start + i] += re[i] * window[i];
+      out[start + i] += fre[i] * window[i];
       norm[start + i] += window[i] * window[i];
     }
   }
 
-  // Normalize by the overlap-add window energy.
+  // Normalize by overlap-add window energy (COLA).
   for (let i = 0; i < length; i++) {
     if (norm[i] > EPS) out[i] /= norm[i];
   }
   return out;
 }
 
+/* --------------------- Vocal-band spectral gate -------------------------- */
+
+function buildBandGain(bins: number, sampleRate: number): Float32Array {
+  const gain = new Float32Array(bins);
+  for (let b = 0; b < bins; b++) {
+    const freq = (b * sampleRate) / FFT_SIZE;
+    if (freq < 100) gain[b] = 0;
+    else if (freq < 150) gain[b] = ((freq - 100) / 50) * 0.5;
+    else if (freq < 5000) gain[b] = 1;
+    else if (freq < 8000)
+      gain[b] = 1 - ((freq - 5000) / 3000) * 0.7;
+    else gain[b] = 0;
+  }
+  return gain;
+}
+
 /* --------------------- Horizontal median filter (HPSS) ------------------- */
 
-/**
- * Median filter along the time axis for each frequency bin.
- * Suppresses percussive transients (broadband vertical streaks) while
- * preserving stable harmonic content (horizontal ridges = vocals).
- */
 function medianFilterTimeAxis(
-  mag: Float32Array,
+  data: Float32Array,
   frames: number,
   bins: number,
   width: number
 ): Float32Array {
   const half = width >> 1;
-  const out = new Float32Array(mag.length);
+  const out = new Float32Array(data.length);
   const window = new Float32Array(width);
 
   for (let b = 0; b < bins; b++) {
@@ -236,10 +240,10 @@ function medianFilterTimeAxis(
       for (let w = -half; w <= half; w++) {
         const ff = f + w;
         if (ff >= 0 && ff < frames) {
-          window[count++] = mag[ff * bins + b];
+          window[count++] = data[ff * bins + b];
         }
       }
-      // Partial-window sort to find median.
+      // Insertion sort the partial window to find the median.
       const slice = window.subarray(0, count);
       const sorted = Float32Array.from(slice).sort();
       out[f * bins + b] = sorted[count >> 1];
@@ -248,17 +252,18 @@ function medianFilterTimeAxis(
   return out;
 }
 
-/* --------------------- Center-channel spectral isolation ------------------ */
+/* --------------------- Spectral vocal isolation -------------------------- */
 
 function isolateSpectrally(
   left: Float32Array,
   right: Float32Array,
   length: number,
-  onYield?: () => Promise<void>
+  sampleRate: number
 ): Float32Array {
   const window = hannWindow(FFT_SIZE);
+  const bandGain = buildBandGain((FFT_SIZE >> 1) + 1, sampleRate);
 
-  // Build mid (center) and side (stereo difference) signals.
+  // Mid / side channels.
   const mid = new Float32Array(length);
   const side = new Float32Array(length);
   for (let i = 0; i < length; i++) {
@@ -267,78 +272,97 @@ function isolateSpectrally(
   }
 
   const midSpec = stft(mid, window);
-  if (onYield) void onYield();
   const sideSpec = stft(side, window);
-  if (onYield) void onYield();
-
   const { frames, bins } = midSpec;
 
-  // Per-bin Wiener soft mask: mask = mid_mag^p / (mid_mag^p + side_mag^p + eps)
-  // where p = SHARPEN. No floor — aggressively remove side energy.
-  const maskMag = new Float32Array(midSpec.mag.length);
-  for (let i = 0; i < maskMag.length; i++) {
-    const m = midSpec.mag[i];
-    const s = sideSpec.mag[i];
-    const mp = Math.pow(m, SHARPEN);
-    const sp = Math.pow(s, SHARPEN);
-    maskMag[i] = mp / (mp + sp + EPS);
+  // Per-bin magnitudes.
+  const midMag = new Float32Array(frames * bins);
+  const sideMag = new Float32Array(frames * bins);
+  for (let i = 0; i < midMag.length; i++) {
+    const mr = midSpec.re[i];
+    const mi = midSpec.im[i];
+    const sr = sideSpec.re[i];
+    const si = sideSpec.im[i];
+    midMag[i] = Math.sqrt(mr * mr + mi * mi);
+    sideMag[i] = Math.sqrt(sr * sr + si * si);
   }
 
-  // Apply mask to the mid magnitude.
-  const maskedMag = new Float32Array(maskMag.length);
+  // Combined gain: mid/side soft mask × vocal-band gate.
+  const gain = new Float32Array(frames * bins);
+  for (let i = 0; i < gain.length; i++) {
+    const m2 = midMag[i] * midMag[i];
+    const s2 = sideMag[i] * sideMag[i];
+    const mask = m2 / (m2 + s2 + EPS);
+    const b = i % bins;
+    gain[i] = mask * bandGain[b];
+  }
+
+  // Apply gain to mid magnitude.
+  const maskedMag = new Float32Array(frames * bins);
   for (let i = 0; i < maskedMag.length; i++) {
-    maskedMag[i] = midSpec.mag[i] * maskMag[i];
+    maskedMag[i] = midMag[i] * gain[i];
   }
 
-  // HPSS: horizontal median filter to suppress percussive transients.
-  const harmonicMag = medianFilterTimeAxis(maskedMag, frames, bins, MEDIAN_FILTER_WIDTH);
-  if (onYield) void onYield();
+  // HPSS: horizontal median filter suppresses percussive transients.
+  const harmonicMag = medianFilterTimeAxis(
+    maskedMag,
+    frames,
+    bins,
+    HPSS_WIDTH
+  );
 
-  // Reconstruct with the original mid phase.
-  const isolated = istft(
-    { mag: harmonicMag, phase: midSpec.phase, frames, bins },
+  // Reconstruct complex spectrum with original mid phase.
+  const outRe = new Float32Array(frames * bins);
+  const outIm = new Float32Array(frames * bins);
+  for (let i = 0; i < outRe.length; i++) {
+    const mr = midSpec.re[i];
+    const mi = midSpec.im[i];
+    const midMagVal = Math.sqrt(mr * mr + mi * mi);
+    const phase =
+      midMagVal > EPS ? Math.atan2(mi, mr) : 0;
+    outRe[i] = harmonicMag[i] * Math.cos(phase);
+    outIm[i] = harmonicMag[i] * Math.sin(phase);
+  }
+
+  return istft(
+    { re: outRe, im: outIm, frames, bins },
     window,
     length
   );
-  if (onYield) void onYield();
-
-  return isolated;
 }
 
 /* ------------------------- Mono fallback isolation ----------------------- */
 
-/**
- * For mono input there's no side channel to mask with. Fall back to a
- * spectral-envelope approach: emphasize the vocal frequency band
- * (roughly 150 Hz–6 kHz with formant peaks) via EQ only.
- */
 function isolateMonoFallback(
   samples: Float32Array,
-  onYield?: () => Promise<void>
+  sampleRate: number
 ): Float32Array {
   const window = hannWindow(FFT_SIZE);
+  const bandGain = buildBandGain((FFT_SIZE >> 1) + 1, sampleRate);
   const spec = stft(samples, window);
-  if (onYield) void onYield();
-
   const { frames, bins } = spec;
-  const sampleRate = 44100; // reasonable default; real SR applied in caller
-  // Apply a vocal-band spectral gain curve.
-  for (let b = 0; b < bins; b++) {
-    const freq = (b * sampleRate) / FFT_SIZE;
-    let gain = 1;
-    if (freq < 90) gain = 0.1; // kill sub-bass
-    else if (freq < 150) gain = 0.4; // attenuate bass
-    else if (freq <= 6000) gain = 1.0; // vocal band — keep
-    else if (freq <= 9000) gain = 0.6; // gentle rolloff
-    else gain = 0.15; // kill highs
-    for (let f = 0; f < frames; f++) {
-      spec.mag[f * bins + b] *= gain;
-    }
+
+  const mag = new Float32Array(frames * bins);
+  for (let i = 0; i < mag.length; i++) {
+    const r = spec.re[i];
+    const im = spec.im[i];
+    mag[i] = Math.sqrt(r * r + im * im) * bandGain[i % bins];
   }
 
-  const out = istft(spec, window, samples.length);
-  if (onYield) void onYield();
-  return out;
+  const harmonicMag = medianFilterTimeAxis(mag, frames, bins, HPSS_WIDTH);
+
+  const outRe = new Float32Array(frames * bins);
+  const outIm = new Float32Array(frames * bins);
+  for (let i = 0; i < outRe.length; i++) {
+    const r = spec.re[i];
+    const im = spec.im[i];
+    const m = Math.sqrt(r * r + im * im);
+    const phase = m > EPS ? Math.atan2(im, r) : 0;
+    outRe[i] = harmonicMag[i] * Math.cos(phase);
+    outIm[i] = harmonicMag[i] * Math.sin(phase);
+  }
+
+  return istft({ re: outRe, im: outIm, frames, bins }, window, samples.length);
 }
 
 /* --------------------------- WAV encoding (16-bit) ----------------------- */
@@ -400,33 +424,22 @@ async function renderEQ(
   const source = offline.createBufferSource();
   source.buffer = buf;
 
-  // High-pass 90 Hz — remove residual bass/kick.
   const highpass = offline.createBiquadFilter();
   highpass.type = "highpass";
-  highpass.frequency.value = 90;
+  highpass.frequency.value = 100;
   highpass.Q.value = 0.707;
 
-  // Low-pass 9 kHz — tighten vocal band, kill cymbal residue.
   const lowpass = offline.createBiquadFilter();
   lowpass.type = "lowpass";
-  lowpass.frequency.value = 9000;
+  lowpass.frequency.value = 8000;
   lowpass.Q.value = 0.707;
 
-  // Presence boost +5 dB @ 2.8 kHz — vocal clarity.
   const presence = offline.createBiquadFilter();
   presence.type = "peaking";
   presence.frequency.value = 2800;
   presence.Q.value = 1.2;
   presence.gain.value = 5;
 
-  // De-esser — reduce sibilance around 6.5 kHz.
-  const deesser = offline.createBiquadFilter();
-  deesser.type = "peaking";
-  deesser.frequency.value = 6500;
-  deesser.Q.value = 2;
-  deesser.gain.value = -4;
-
-  // Compressor — even out vocal dynamics.
   const comp = offline.createDynamicsCompressor();
   comp.threshold.value = -22;
   comp.knee.value = 28;
@@ -434,15 +447,13 @@ async function renderEQ(
   comp.attack.value = 0.003;
   comp.release.value = 0.25;
 
-  // Make-up gain.
   const makeup = offline.createGain();
-  makeup.gain.value = 1.4;
+  makeup.gain.value = 1.5;
 
   source
     .connect(highpass)
     .connect(lowpass)
     .connect(presence)
-    .connect(deesser)
     .connect(comp)
     .connect(makeup)
     .connect(offline.destination);
@@ -461,7 +472,7 @@ export async function isolateVoice(
 ): Promise<IsolateResult> {
   const { onProgress } = opts;
 
-  // Stage 1: get a decodable audio file. Videos need ffmpeg extraction first.
+  // Stage 1: get a decodable audio file.
   let audioBlob: Blob;
   const isVideo =
     file.type.startsWith("video/") || VIDEO_RE.test(file.name);
@@ -470,7 +481,7 @@ export async function isolateVoice(
     const extracted = await extractAudio(file, {
       format: "wav",
       bitrate: "192k",
-      onProgress: (r) => onProgress?.(r * 0.25),
+      onProgress: (r) => onProgress?.(r * 0.2),
     });
     audioBlob = extracted.blob;
   } else {
@@ -499,26 +510,17 @@ export async function isolateVoice(
   let isolated: Float32Array;
 
   if (audioBuffer.numberOfChannels >= 2) {
-    const left = audioBuffer.getChannelData(0);
-    const right = audioBuffer.getChannelData(1);
-    isolated = isolateSpectrally(
-      left as Float32Array,
-      right as Float32Array,
-      length,
-      async () => {
-        onProgress?.(0.4 + Math.random() * 0.05);
-        await sleep();
-      }
-    );
+    const left = audioBuffer.getChannelData(0) as Float32Array;
+    const right = audioBuffer.getChannelData(1) as Float32Array;
+    isolated = isolateSpectrally(left, right, length, sampleRate);
   } else {
     const mono = audioBuffer.getChannelData(0) as Float32Array;
-    isolated = isolateMonoFallback(mono, async () => {
-      await sleep();
-    });
+    isolated = isolateMonoFallback(mono, sampleRate);
   }
+  await sleep();
   onProgress?.(0.75);
 
-  // Stage 4: EQ + dynamics render.
+  // Stage 4: EQ + dynamics.
   const rendered = await renderEQ(isolated, sampleRate, length);
   onProgress?.(0.92);
 

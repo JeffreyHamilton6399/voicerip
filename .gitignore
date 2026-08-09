@@ -64,4 +64,4 @@ server.log
 /prisma/
 /db/
 /prompt
-/test
+/testupload/
