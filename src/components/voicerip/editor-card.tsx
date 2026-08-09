@@ -366,15 +366,17 @@ export function EditorCard({
               <Waves className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
               <div className="space-y-1.5 text-xs leading-relaxed text-muted-foreground">
                 <p className="font-medium text-foreground">
-                  Center-channel vocal extraction
+                  Spectral vocal isolation
                 </p>
                 <p>
-                  Isolates vocals using stereo mid-side analysis with an
-                  energy-ratio soft mask, then an 85 Hz–12 kHz bandpass +
-                  presence boost + compressor. Output is mono WAV.
+                  STFT mid/side soft-mask in the frequency domain removes
+                  side-panned instruments. Horizontal median filtering
+                  suppresses drums. Final EQ chain: 90 Hz–9 kHz vocal band,
+                  presence boost, de-ess, compressor. Output is mono WAV.
                 </p>
                 <p className="text-muted-foreground/70">
-                  Works best on stereo music with center-panned vocals.
+                  Best on stereo music. Center-panned bass/piano may leak —
+                  they look spectrally identical to vocals.
                 </p>
               </div>
             </div>
