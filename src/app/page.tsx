@@ -3,7 +3,7 @@
 import * as React from "react";
 import { toast } from "sonner";
 import { Header } from "@/components/voicerip/header";
-import { Footer } from "@/components/voicerip/footer";
+import { SiteFooter } from "@/components/site-footer";
 import { Dropzone } from "@/components/voicerip/dropzone";
 import { EditorCard } from "@/components/voicerip/editor-card";
 import { BatchList } from "@/components/voicerip/batch-list";
@@ -98,7 +98,7 @@ export default function Page() {
         </TermsGate>
       </main>
 
-      <Footer />
+      <SiteFooter />
 
       <input
         ref={fileInputRef}
