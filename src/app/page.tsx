@@ -7,7 +7,6 @@ import { SiteFooter } from "@/components/site-footer";
 import { Dropzone } from "@/components/voicerip/dropzone";
 import { EditorCard } from "@/components/voicerip/editor-card";
 import { BatchList } from "@/components/voicerip/batch-list";
-import { TermsGate } from "@/components/voicerip/terms-gate";
 import {
   getFFmpeg,
   probeDuration,
@@ -74,28 +73,26 @@ export default function Page() {
       <Header />
 
       <main className="flex min-h-0 flex-1 flex-col">
-        <TermsGate>
-          {items.length === 0 ? (
-            <div className="flex min-h-0 flex-1 items-stretch p-4">
-              <Dropzone onFiles={handleFiles} onError={onError} />
-            </div>
-          ) : single ? (
-            <EditorCard
-              item={items[0]}
-              onRemove={() => removeItem(items[0].id)}
-              onNewFile={newFile}
-              onError={onError}
-            />
-          ) : (
-            <BatchList
-              items={items}
-              onAddMore={addMore}
-              onRemove={removeItem}
-              onClear={clearAll}
-              onError={onError}
-            />
-          )}
-        </TermsGate>
+        {items.length === 0 ? (
+          <div className="flex min-h-0 flex-1 items-stretch p-4">
+            <Dropzone onFiles={handleFiles} onError={onError} />
+          </div>
+        ) : single ? (
+          <EditorCard
+            item={items[0]}
+            onRemove={() => removeItem(items[0].id)}
+            onNewFile={newFile}
+            onError={onError}
+          />
+        ) : (
+          <BatchList
+            items={items}
+            onAddMore={addMore}
+            onRemove={removeItem}
+            onClear={clearAll}
+            onError={onError}
+          />
+        )}
       </main>
 
       <SiteFooter />
