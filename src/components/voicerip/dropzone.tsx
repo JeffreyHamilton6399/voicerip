@@ -68,7 +68,7 @@ export function Dropzone({ onFiles, onError }: DropzoneProps) {
     <div
       onPaste={onPaste}
       tabIndex={0}
-      className="flex h-full w-full items-center justify-center"
+      className="flex h-full w-full overflow-y-auto"
     >
       <div
         role="button"
@@ -103,7 +103,7 @@ export function Dropzone({ onFiles, onError }: DropzoneProps) {
           handleFiles(e.dataTransfer?.files ?? null);
         }}
         className={cn(
-          "group mx-auto flex min-h-[300px] w-full max-w-md cursor-pointer flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed px-6 py-10 text-center transition-colors",
+          "group m-auto flex min-h-[300px] w-full max-w-md shrink-0 cursor-pointer flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed px-6 py-10 text-center transition-colors",
           dragging
             ? "border-foreground bg-foreground/5"
             : "border-border hover:border-foreground/40 hover:bg-muted/30"
