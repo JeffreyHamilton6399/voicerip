@@ -21,7 +21,7 @@ import {
   type Mp3Bitrate,
   type VideoItem,
 } from "@/lib/extract-audio";
-import { separateAudio, type SeparateResult } from "@/lib/separate";
+import type { SeparateResult } from "@/lib/separate";
 import { TrackCard } from "@/components/voicerip/track-card";
 import {
   formatBytes,
@@ -135,6 +135,9 @@ export function EditorCard({
     setStage("Loading models…");
 
     try {
+      // onnxruntime comes along with the separation engine — load it only when
+      // someone actually separates, not for everyone who opens the page.
+      const { separateAudio } = await import("@/lib/separate");
       const res = await separateAudio(item.file, {
         onProgress: (r, s) => {
           setProgress(r);
