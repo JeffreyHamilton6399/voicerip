@@ -1,15 +1,15 @@
 import type { Metadata, Viewport } from "next";
-import { Chivo, Chivo_Mono } from "next/font/google";
+import { Inter_Tight, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "@/components/ui/sonner";
 import { ThemeProvider } from "@/components/theme-provider";
 
-const sans = Chivo({
+const sans = Inter_Tight({
   variable: "--font-app-sans",
   subsets: ["latin"],
 });
 
-const mono = Chivo_Mono({
+const mono = JetBrains_Mono({
   variable: "--font-app-mono",
   subsets: ["latin"],
 });
