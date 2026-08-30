@@ -2,7 +2,7 @@ const GITHUB_URL = "https://github.com/JeffreyHamilton6399";
 
 /**
  * The one footer every Jeffrey Hamilton tool shares. Feedback deliberately
- * lives only in the header pill — one obvious entry point beats two quiet ones.
+ * lives only in the header pill - one obvious entry point beats two quiet ones.
  */
 export function SiteFooter() {
   return (

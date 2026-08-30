@@ -1,46 +1,38 @@
 import type { Metadata, Viewport } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Chivo, Chivo_Mono } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "@/components/ui/sonner";
 import { ThemeProvider } from "@/components/theme-provider";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+const sans = Chivo({
+  variable: "--font-app-sans",
   subsets: ["latin"],
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+const mono = Chivo_Mono({
+  variable: "--font-app-mono",
   subsets: ["latin"],
 });
 
 export const metadata: Metadata = {
-  title: "VoiceRip — Separate vocals, drums & bass from any song",
+  title: "VoiceRip: split a song into vocals, drums and bass",
   description:
-    "Extract audio or separate vocals, drums, bass and music from any song — right in your browser. 100% free, no sign-up, no uploads.",
-  keywords: [
-    "vocal remover",
-    "stem separation",
-    "audio extractor",
-    "spleeter",
-    "isolate vocals",
-    "remove vocals",
-  ],
+    "Separate a track into stems, or just pull the audio out of a video. Each stem downloads on its own. The separation runs in the browser tab.",
   authors: [{ name: "Jeffrey Hamilton" }],
   icons: {
     icon: "/favicon.svg",
   },
   openGraph: {
-    title: "VoiceRip — Separate vocals, drums & bass from any song",
+    title: "VoiceRip",
     description:
-      "Extract audio or separate vocals, drums, bass and music from any song — right in your browser.",
+      "Split a song into vocals, drums, bass and the rest.",
     type: "website",
   },
   twitter: {
     card: "summary",
-    title: "VoiceRip — Separate vocals, drums & bass from any song",
+    title: "VoiceRip",
     description:
-      "Extract audio or separate vocals, drums, bass and music. 100% client-side.",
+      "Split a song into vocals, drums, bass and the rest.",
   },
 };
 
@@ -62,7 +54,7 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-background text-foreground`}
+        className={`${sans.variable} ${mono.variable} antialiased bg-background text-foreground`}
       >
         <ThemeProvider
           attribute="class"

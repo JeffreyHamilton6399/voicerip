@@ -34,7 +34,7 @@ export function Dropzone({ onFiles, onError }: DropzoneProps) {
         }
         if (f.size > max) {
           onError(
-            `"${f.name}" is ${formatBytes(f.size)} — over the ${formatBytes(
+            `"${f.name}" is ${formatBytes(f.size)}, over the ${formatBytes(
               max
             )} limit.`
           );
@@ -134,15 +134,15 @@ export function Dropzone({ onFiles, onError }: DropzoneProps) {
 
         <p className="text-base font-semibold tracking-tight">Drop files</p>
         <p className="max-w-[34ch] text-sm text-muted-foreground">
-          Separate vocals, drums, and bass, or extract audio — in your browser.
+          Split a track into stems, or pull the audio out of a video.
         </p>
         <p className="text-xs text-muted-foreground/70">
           or paste from clipboard
         </p>
 
         <span className="mt-1 inline-flex items-center gap-1.5 rounded-full bg-muted px-3 py-1 text-xs font-medium text-muted-foreground">
-          <ShieldCheck className="size-3.5 text-emerald-500" />
-          No uploads · No sign-up · 100% free
+          <ShieldCheck className="size-3.5 text-pink-500" />
+          Separated here, not on a server.
         </span>
       </div>
     </div>

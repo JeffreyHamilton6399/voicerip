@@ -53,7 +53,7 @@ const MODEL_BASE =
   "https://huggingface.co/Best-Practice/spleeter-4stems-onnx/resolve/main";
 const STEM_NAMES = ["vocals", "drums", "bass", "other"] as const;
 
-// Cache for loaded models — avoids re-downloading on repeat use.
+// Cache for loaded models - avoids re-downloading on repeat use.
 const modelCache = new Map<string, ort.InferenceSession>();
 
 function baseName(filename: string): string {
@@ -361,7 +361,7 @@ export async function separateAudio(
       }
     }
   }
-  // Reshape to [2, splits, T, F] — already in that layout
+  // Reshape to [2, splits, T, F] - already in that layout
 
   // Stage 4: Run all 4 models
   const estimates: Record<string, Float32Array> = {};
@@ -480,6 +480,6 @@ export async function preloadModels(): Promise<void> {
       await loadModel(stem);
     }
   } catch {
-    // Silent — will retry on actual use
+    // Silent - will retry on actual use
   }
 }

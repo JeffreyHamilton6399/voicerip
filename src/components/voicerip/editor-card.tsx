@@ -135,7 +135,7 @@ export function EditorCard({
     setStage("Loading models…");
 
     try {
-      // onnxruntime comes along with the separation engine — load it only when
+      // onnxruntime comes along with the separation engine - load it only when
       // someone actually separates, not for everyone who opens the page.
       const { separateAudio } = await import("@/lib/separate");
       const res = await separateAudio(item.file, {
@@ -398,7 +398,7 @@ export function EditorCard({
           </div>
         )}
 
-        {/* Separate results — track cards */}
+        {/* Separate results - track cards */}
         {mode === "separate" && status === "done" && separateResult && (
           <div className="space-y-2">
             <div className="flex items-center justify-between">

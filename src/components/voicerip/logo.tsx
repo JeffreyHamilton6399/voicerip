@@ -2,8 +2,8 @@ import * as React from "react";
 import { cn } from "@/lib/utils";
 
 /**
- * VoiceRip logo mark — a sound waveform with a scissors cut.
- * Outline style, currentColor, no filled background — matches the
+ * VoiceRip logo mark - a sound waveform with a scissors cut.
+ * Outline style, currentColor, no filled background - matches the
  * icon language of ShrinkRay (stroke-only lucide-style marks).
  */
 export function Logo({ className }: { className?: string }) {

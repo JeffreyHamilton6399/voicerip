@@ -1,75 +1,72 @@
 # VoiceRip
 
-Extract audio (voice or music) from any video file — instantly, in your browser.
+Two things: split a track into vocals, drums, bass and everything else, or just
+pull the audio out of a video. Both run in the browser.
 
-Drop a video, pick **MP3** or **WAV**, download the audio. No uploads, no sign-up, no server. Your files never leave your device.
+## Stem separation
 
-## Privacy promise
+Deezer's Spleeter 4-stem models, converted to ONNX and run through
+onnxruntime-web. The four `fp16` models are about 19.7 MB each, fetched from
+HuggingFace on first use and cached by the browser after that.
 
-VoiceRip is **100% client-side**. The video you drop is processed entirely inside your browser by [`ffmpeg.wasm`](https://github.com/ffmpegwasm/ffmpeg.wasm). Nothing is ever uploaded — there is no backend, no API, no database, no analytics, no tracking. The only network request is the one-time fetch of the ffmpeg WebAssembly core (cached as a blob URL afterward).
+The pipeline:
 
-> Extract audio from your videos without uploading them anywhere.
+1. Decode to 44100 Hz stereo
+2. STFT with a periodic Hann window, frame 4096, hop 1024, giving 2049 complex bins
+3. Take the magnitude of the first 1024 bins, split into 512-frame chunks
+4. Run the four U-Net models to get four magnitude estimates
+5. Soft ratio mask, `mask = (est² + ε/4) / Σ(est²) + ε`
+6. Extend the mask from 1024 back to 2049 bins using a per-frame mean
+7. Apply it to the original complex STFT, which keeps the phase intact
+8. ISTFT with overlap-add
 
-## Features
+The four masks sum to 1 by construction, so the stems add back up to the
+original mix at around −156 dB. Each stem downloads separately.
 
-- **Formats**: MP4, WebM, MOV, MKV, AVI, OGG → MP3 or WAV
-- **MP3 bitrates**: 128k / 192k / 256k / 320k
-- **WAV**: 16-bit PCM (lossless)
-- **Trim**: optional start / end timestamps (`HH:MM:SS`)
-- **Batch mode**: extract audio from multiple videos at once
-- **Fast**: `-vn` (no video processing) — audio-only encode
-- **Dark mode**: follows your system theme
-- **Mobile-first**: works on a 390px viewport, 100MB file cap on mobile (500MB desktop)
-- **Custom logo**: flat SVG microphone-in-film-strip mark
+## Audio extraction
 
-## Tech stack
+`ffmpeg.wasm` with `-vn`, so no video is decoded. Takes MP4, WebM, MOV, MKV, AVI
+and OGG, and writes MP3 at 128/192/256/320k or 16-bit PCM WAV. Optional
+`HH:MM:SS` start and end for trimming. Batch mode handles several files in a row.
 
-- [Next.js 16](https://nextjs.org/) (App Router) + TypeScript
-- [Tailwind CSS 4](https://tailwindcss.com/) + [shadcn/ui](https://ui.shadcn.com/) (New York)
-- [ffmpeg.wasm](https://github.com/ffmpegwasm/ffmpeg.wasm) (`@ffmpeg/ffmpeg` + `@ffmpeg/util`)
-- [lucide-react](https://lucide.dev/) icons
-- [next-themes](https://github.com/pacocoursey/next-themes) for dark mode
-- [bun](https://bun.sh/) as package manager
-- No backend, no database, no API routes
+ffmpeg is lazy-loaded on the first job. On desktop the worker is kept warm for
+follow-up jobs; on mobile it is torn down after each one to keep memory down,
+where the file cap is 100 MB against 500 MB on desktop.
 
-## Run locally
+## Running it
 
 ```bash
 bun install
-bun run dev
-# open http://localhost:3000
+bun run dev     # http://localhost:3000
 ```
 
-> ffmpeg.wasm needs `Cross-Origin-Opener-Policy: same-origin` and
-> `Cross-Origin-Embedder-Policy: require-corp` headers. They are set in both
-> `next.config.ts` (dev) and `vercel.json` (production).
+ffmpeg.wasm needs `Cross-Origin-Opener-Policy: same-origin` and
+`Cross-Origin-Embedder-Policy: require-corp`. Those are set in `next.config.ts`
+for dev and `vercel.json` for production.
 
-## Deploy to Vercel
+## Built with
 
-1. Push this repo to GitHub.
-2. Go to [vercel.com/new](https://vercel.com/new) and import the repo.
-3. Framework preset: **Next.js**. No env vars needed.
-4. Deploy. `vercel.json` applies the required COOP/COEP headers automatically.
+Next.js 16 (App Router), TypeScript, Tailwind CSS 4, shadcn/ui,
+[ffmpeg.wasm](https://github.com/ffmpegwasm/ffmpeg.wasm),
+[onnxruntime-web](https://onnxruntime.ai/docs/tutorials/web/), next-themes,
+lucide-react. No backend, no database, no API routes.
 
-## How it works
+## Privacy
 
-| Step | What happens |
-| --- | --- |
-| Drop video | `File` read in-browser, duration probed via a hidden `<video>` |
-| Pick format/quality | MP3 → `libmp3lame`, WAV → `pcm_s16le` |
-| Extract | `ffmpeg.wasm` runs `-vn` (audio-only) with optional `-ss/-to` trim |
-| Download | Result `Blob` offered as a local download via object URL |
+Audio is decoded and processed on your device. The only network traffic is the
+one-time fetch of the ffmpeg core and the ONNX model weights, both of which are
+static files. Nothing you drop in is uploaded, and there is no analytics.
 
-ffmpeg.wasm is **lazy-loaded** on first extraction and kept warm on desktop for
-instant follow-up jobs. On mobile the worker is terminated after each extraction
-to keep memory pressure low.
+## Deploying
 
-## Author
-
-**Jeffrey Hamilton** — [GitHub](https://github.com/JeffreyHamilton6399)
-
-Donate: [buymeacoffee.com/jeffreyscof](https://buymeacoffee.com/jeffreyscof)
+Import the repo on Vercel with the Next.js preset. No environment variables.
+`vercel.json` applies the COOP/COEP headers ffmpeg needs.
 
 ## License
 
-MIT
+MIT.
+
+---
+
+Jeffrey Hamilton · [GitHub](https://github.com/JeffreyHamilton6399) ·
+[buy me a coffee](https://buymeacoffee.com/jeffreyscof)

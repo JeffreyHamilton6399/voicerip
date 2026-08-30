@@ -1,7 +1,7 @@
 /**
  * Client-side audio extraction via ffmpeg.wasm.
  *
- * Everything runs in the browser — the video file never leaves the device.
+ * Everything runs in the browser - the video file never leaves the device.
  * ffmpeg.wasm is lazy-loaded on first extraction and kept warm on desktop
  * for fast follow-up jobs. On mobile the worker is terminated after each
  * extraction to keep memory pressure low.
@@ -24,7 +24,7 @@ export interface VideoItem {
 
 export interface ExtractOptions {
   format: AudioFormat;
-  /** MP3 only — ignored for WAV. */
+  /** MP3 only - ignored for WAV. */
   bitrate: Mp3Bitrate;
   /** Trim start in seconds. Omit/null for no trim. */
   startSec?: number | null;
@@ -177,9 +177,9 @@ export async function extractAudio(
 
     const data = await ffmpeg.readFile(outputName);
     const arr =
-      data instanceof Uint8Array ? data : new Uint8Array(data as ArrayBuffer);
+      typeof data === "string" ? new TextEncoder().encode(data) : data;
     const mime = format === "mp3" ? "audio/mpeg" : "audio/wav";
-    const blob = new Blob([arr], { type: mime });
+    const blob = new Blob([arr as BlobPart], { type: mime });
 
     // Clean up the virtual FS so repeated extractions don't balloon memory.
     try {

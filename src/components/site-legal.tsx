@@ -27,12 +27,12 @@ function PrivacyBody() {
   return (
     <>
       <p>
-        Your privacy is the whole point of VoiceRip. This page explains exactly
-        what happens when you use it.
+        This page describes what VoiceRip does with what you give it, and what it
+        does not do.
       </p>
 
-      <h3>We don’t see your media files. Ever.</h3>
-      <p>Audio extraction and stem separation run locally on your device via WebAssembly. The separation model is downloaded to your browser and runs there — your media is never uploaded.</p>
+      <h3>Your media files stay on your device</h3>
+      <p>Audio extraction and stem separation run locally on your device via WebAssembly. The separation model is downloaded to your browser and runs there, your media is never uploaded.</p>
       <p>Your media files are <strong>never uploaded to any server</strong>, never stored, and never transmitted across the network.</p>
 
       <h3>No accounts, no tracking identifiers</h3>
@@ -69,7 +69,7 @@ function PrivacyBody() {
 
       <h3>Changes to this policy</h3>
       <p>
-        If this ever changes, this page will be updated. Because the tool is built to run without a server, the core promise — your media files stay on your device — will not change.
+        If this ever changes, this page will be updated. Because the tool is built to run without a server, the promise that your media files stay on your device will not change.
       </p>
 
       <h3>Contact</h3>
@@ -97,7 +97,7 @@ function TermsBody() {
       <h3>The service</h3>
       <p>
         VoiceRip is a free, browser-based tool for extracting and separating audio from video. It is provided “as is” and “as available”,
-        without warranties of any kind — express or implied — including
+        without warranties of any kind, express or implied, including
         warranties of merchantability or fitness for a particular purpose.
       </p>
 
@@ -119,7 +119,7 @@ function TermsBody() {
       <h3>Free and open</h3>
       <p>
         VoiceRip is free to use. There are no paid tiers, no watermarks, and no
-        usage limits imposed by the tool itself. The source is on GitHub — you
+        usage limits imposed by the tool itself. The source is on GitHub. You
         are welcome to inspect, fork, or self-host it.
       </p>
 
@@ -161,7 +161,7 @@ export function LegalDialog({
       <DialogContent className="max-h-[85vh] gap-0 overflow-hidden p-0 sm:max-w-2xl">
         <DialogHeader className="border-b px-6 py-4 text-left">
           <DialogTitle className="flex items-center gap-2 text-xl">
-            <Icon className="size-5 text-emerald-500" />
+            <Icon className="size-5 text-pink-500" />
             {isPrivacy ? "Privacy Policy" : "Terms of Service"}
           </DialogTitle>
           <DialogDescription>Last updated: {LAST_UPDATED}</DialogDescription>
